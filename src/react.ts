@@ -33,7 +33,8 @@ import {
   Consumer as ReactConsumer,
   ProviderExoticComponent,
   ProviderProps,
-  createContext
+  createContext,
+  Fragment as ReactFragment
 } from "react";
 import * as NoNo from "react";
 import { isIterable, isPromise } from "iterable";
@@ -506,11 +507,19 @@ export function map(collector: DeferredActionCollector, reactContext: ReactConte
         context: element.type._context,
         value: element.props.value
       },
+      source: element,
       children: mapChildren(element.props.children, nextReactContext)
     };
   } else if (isReactElement(element)) {
     const { type, props } = element;
-    if (typeof type === "function") {
+    if (type === ReactFragment) {
+      return {
+        reference: Fragment,
+        options: {},
+        source: element,
+        children: mapChildren(element.props.children, reactContext)
+      };
+    } else if (typeof type === "function") {
       return createVNodeWithContext(context, () => React({ [REACT_TREE]: true, [REACT_CONTEXT]: reactContext }, { reference: Fragment, source: type, options: props || {} }));
     } else {
       return createSourceNode(element, type);
@@ -727,7 +736,8 @@ function isReactElement(value: unknown): value is ReactElement {
       typeof value.type === "function" ||
       typeof value.type === "string" ||
       isReactContextConsumerElement(value) ||
-      isReactContextProviderElement(value)
+      isReactContextProviderElement(value) ||
+      value.type === ReactFragment
     )
   );
 }

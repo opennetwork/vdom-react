@@ -10,7 +10,8 @@ import {
   useState,
   useReducer,
   createContext,
-  useContext, useLayoutEffect
+  useContext, useLayoutEffect,
+  Fragment as ReactFragment
 } from "react";
 import {render, DOMVContext} from "@opennetwork/vdom";
 
@@ -52,7 +53,12 @@ function A() {
 
   const ref = useRef(null)
 
-  return createElement("b", { key: "stable", onClick, id: "clickable", ref }, `A: ${state}`)
+  return createElement(
+    ReactFragment,
+    {},
+    createElement("b", { key: "stable", onClick, id: "clickable", ref }, `A: ${state}`),
+    createElement("c", { }, `D: ${state}`)
+  )
 }
 
 async function Z() {
