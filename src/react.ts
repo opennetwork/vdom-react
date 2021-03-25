@@ -117,16 +117,11 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
   async function *cycleChildren(source: SourceReferenceRepresentationFactory<Props>): AsyncIterable<ReadonlyArray<VNode>> {
     const updateQueueIterator = updateQueue[Symbol.asyncIterator]();
     let updateQueueIterationResult: IteratorResult<ReadonlyArray<DeferredAction>> | undefined = undefined;
-
+    let updateQueueIterationPromise: Promise<void> | undefined = undefined;
     const knownErrors = new WeakSet<typeof suspendedPromise>();
 
     do {
-
-      for (const update of updateQueueIterationResult?.value ?? []) {
-        await update();
-      }
       updateQueueIterationResult = undefined;
-
       try {
         const latestValue = await cycle(source, currentProps);
         if (hookIndex === -1 && !options[REACT_TREE]) {
@@ -142,7 +137,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
         if (isPromise(error)) {
           // If we are here, and we know this error, it was already thrown and resolved
           if (!knownErrors.has(error)) {
-            suspendedPromise = error;
+            suspendedPromise = error.then(() => suspendedPromise = undefined);
             knownErrors.add(error);
           }
         } else {
@@ -151,12 +146,25 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
         }
       }
 
-      updateQueueIterationResult = await updateQueueIterator.next();
+      updateQueueIterationPromise = updateQueueIterationPromise || updateQueueIterator.next()
+        .then((result) => {
+          updateQueueIterationResult = result;
+        });
 
       if (suspendedPromise) {
-        await suspendedPromise;
-        suspendedPromise = undefined;
+        await Promise.any([
+          suspendedPromise,
+          updateQueueIterationPromise
+        ]);
+      } else {
+        await updateQueueIterationPromise;
+        updateQueueIterationPromise = undefined;
       }
+
+      for (const update of updateQueueIterationResult?.value ?? []) {
+        await update();
+      }
+      updateQueueIterationResult = undefined;
 
     } while (!updateQueueIterationResult?.done);
 
