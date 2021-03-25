@@ -10,7 +10,7 @@ import {
   useState,
   useReducer,
   createContext,
-  useContext
+  useContext, useLayoutEffect
 } from "react";
 import {render, DOMVContext} from "@opennetwork/vdom";
 
@@ -50,7 +50,9 @@ function A() {
 
   }, [])
 
-  return createElement("b", { key: "stable", onClick, id: "clickable" }, `A: ${state}`)
+  const ref = useRef(null)
+
+  return createElement("b", { key: "stable", onClick, id: "clickable", ref }, `A: ${state}`)
 }
 
 async function Z() {

@@ -551,7 +551,7 @@ export function map(collector: DeferredActionCollector, reactContext: ReactConte
       return isIterable(source);
     }
   }
-  function createSourceNode({ props, key }: ReactElement, source: string): NativeOptionsVNode {
+  function createSourceNode({ props, key, ref }: ReactElement & { ref?: unknown }, source: string): NativeOptionsVNode {
     const node: NativeOptionsVNode = {
       source,
       reference: key || Symbol("React"),
@@ -560,6 +560,7 @@ export function map(collector: DeferredActionCollector, reactContext: ReactConte
         async onBeforeRender(documentNode: Element & ProxiedListeners | Text) {
           if (!isElement(documentNode)) return;
           documentNode._collector = documentNode._collector ?? collector;
+
           const attributes: NativeAttributes = {};
           let hasAttribute = false;
           for (const key of Object.keys(props)) {
@@ -570,12 +571,14 @@ export function map(collector: DeferredActionCollector, reactContext: ReactConte
             const value = props[key];
             if (key === "value" || key === "checked") {
               // Do nothing, use defaultValue or defaultChecked attribute
+              continue;
             } else if (key === "class" || key === "className") {
               if (typeof value === "string") {
                 documentNode.className = value;
               } else {
                 documentNode.className = "";
               }
+              continue;
             } else if (key === "dangerouslySetInnerHTML") {
               documentNode.innerHTML = props["dangerouslySetInnerHTML"];
             } else if (key === "style") {
@@ -586,6 +589,7 @@ export function map(collector: DeferredActionCollector, reactContext: ReactConte
               // } else {
               //   // TODO
               // }
+              continue;
             } else if (key.startsWith("on")) {
               const keyWithoutCapture = key.replace(/Capture$/, "");
               const useCapture = keyWithoutCapture !== key;
@@ -602,6 +606,7 @@ export function map(collector: DeferredActionCollector, reactContext: ReactConte
               } else {
                 documentNode.removeEventListener(name, handler, useCapture);
               }
+              continue;
             } else if (
               isDocumentNodeKey(key) &&
               !isReadOnlyDocumentKey(key)
@@ -631,8 +636,21 @@ export function map(collector: DeferredActionCollector, reactContext: ReactConte
             }, documentNode);
           }
 
+          if (typeof ref === "function") {
+            ref(documentNode);
+          } else if (isMutableRef(ref)) {
+            ref.current = documentNode;
+          }
+
           function isDocumentNodeKey<K>(key: K): key is K & keyof Element {
             return key in documentNode;
+          }
+
+          function isMutableRef(input: unknown): input is MutableRefObject<Element> {
+            function isMutableRefLike(input: unknown): input is Record<string, unknown> {
+              return !!input && input === ref;
+            }
+            return isMutableRefLike(input) && "current" in input;
           }
 
         }
@@ -676,7 +694,6 @@ function scopedEvent(this: ProxiedListeners, event: Event, useCapture: boolean) 
   const fn = this._listeners?.[event.type + useCapture];
   if (typeof fn === "function") {
     const result = fn(event);
-    console.log({ result, promise: isPromise(result) });
     if (isPromise(result)) {
       const action: DeferredAction & { priority?: number, render?: boolean } = () => result;
       action.priority = 1;
