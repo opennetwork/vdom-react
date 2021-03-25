@@ -1,0 +1,471 @@
+import {
+  createVNodeWithContext,
+  Fragment, isSourceReference, SourceReference,
+  SourceReferenceRepresentationFactory,
+  VNode
+} from "@opennetwork/vnode";
+import { NativeOptionsVNode } from "@opennetwork/vdom";
+import { SourceReferenceRepresentation } from "@opennetwork/vnode/src/source";
+import {
+  Destructor,
+  FunctionComponentUpdateQueue,
+  SharedInternals,
+  WorkInProgressHook,
+  WorkInProgressHookEffect,
+  WorkInProgressHookQueue,
+} from "react-reconciler";
+import {
+  Dispatch, DispatchWithoutAction,
+  EffectCallback,
+  MutableRefObject,
+  ReactElement,
+  ReactNode, Reducer, ReducerAction, ReducerState, ReducerStateWithoutAction, ReducerWithoutAction,
+  RefObject,
+  SetStateAction,
+} from "react";
+import * as NoNo from "react";
+import { isIterable } from "iterable";
+import { Collector } from "microtask-collector";
+
+const REACT_TREE = Symbol("React Tree");
+const PROPS_BRAND = Symbol("Props");
+
+
+export interface ReactOptions extends Record<string, unknown> {
+  [REACT_TREE]?: boolean;
+}
+
+export async function *React(options: ReactOptions, node: VNode): AsyncIterable<NativeOptionsVNode | VNode & { native?: unknown }> {
+  type Props = { __isProps: typeof PROPS_BRAND };
+
+  assertSharedInternalsPresent(NoNo);
+  const { __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED: SharedInternals } = NoNo;
+
+  const hooks: unknown[] = [];
+  let hookIndex = -1;
+  let queue: Promise<void> = Promise.resolve();
+
+  interface DeferredAction {
+    (): void | Promise<void>;
+  }
+
+  const updateQueue = new Collector<DeferredAction, ReadonlyArray<DeferredAction>>({
+    map: Object.freeze
+  });
+
+  let componentUpdateQueue: FunctionComponentUpdateQueue | undefined = undefined;
+
+  const { source, reference, options: props = {} } = node;
+
+  assertProps(props);
+  assertFunction(source);
+  assertFragment(reference);
+
+  const updateQueueIterator = updateQueue[Symbol.asyncIterator]();
+  let updateQueueIterationResult: IteratorResult<ReadonlyArray<DeferredAction>> | undefined = undefined;
+
+  do {
+
+    for (const update of updateQueueIterationResult?.value ?? []) {
+      await update();
+    }
+
+    const latestValue = await cycle(source, props);
+    if (hookIndex === -1 && !options[REACT_TREE]) {
+      yield createVNodeWithContext({}, latestValue);
+    }
+    if (!latestValue) {
+      yield undefined;
+    } else {
+      assertLatestValueReactElement(latestValue);
+      yield map(latestValue);
+    }
+
+    updateQueueIterationResult = await updateQueueIterator.next();
+
+  } while (!updateQueueIterationResult.done);
+
+  function assertLatestValueReactElement(latestValue: unknown): asserts latestValue is ReactElement {
+    if (!isReactElement(latestValue)) {
+      throw new Error("Expected ReactElement");
+    }
+  }
+
+  async function cycle(source: SourceReferenceRepresentationFactory<Props>, props: Props) {
+    queue = Promise.resolve();
+    hookIndex = -1;
+    componentUpdateQueue = undefined;
+
+    const latestValue = await renderWithHooks(source, props);
+    if (hookIndex === -1) {
+      // We are rendering only, no hooks utilised
+      return latestValue;
+    }
+
+    commitHookEffectList(0);
+
+    return latestValue;
+  }
+
+  function commitHookEffectList(tag: number) {
+    if (!componentUpdateQueue?.lastEffect) return;
+    const firstEffect = componentUpdateQueue.lastEffect.next;
+    let effect = firstEffect;
+    do {
+      if ((effect.tag & tag) === tag) {
+        const create = effect.create;
+        const destroy = create();
+        effect.destroy = destroy ? destroy : undefined;
+      }
+      effect = effect.next;
+    } while (effect !== firstEffect);
+  }
+
+  function assertFunction(source: unknown): asserts source is SourceReferenceRepresentationFactory<Props> {
+    if (typeof source !== "function") {
+      throw new Error("Expected function source");
+    }
+  }
+
+  function assertFragment(reference: unknown): asserts reference is typeof Fragment {
+    if (reference !== Fragment) {
+      throw new Error("Expected fragment reference");
+    }
+  }
+
+  function assertProps(props: unknown): asserts props is Props {
+    if (!props) {
+      throw new Error("Expected props");
+    }
+  }
+
+  async function renderWithHooks(source: SourceReferenceRepresentationFactory<Props>, props: Props): Promise<SourceReferenceRepresentation<Props>> {
+    hookIndex = -1;
+
+    SharedInternals.ReactCurrentDispatcher.current = {
+      useRef,
+      useMemo,
+      useCallback,
+      useEffect,
+      useLayoutEffect: useEffect,
+      useState,
+      useReducer,
+    };
+
+    const returnedValue = source(props, { reference: Fragment, children: node.children } );
+    SharedInternals.ReactCurrentOwner.current = undefined;
+    SharedInternals.ReactCurrentDispatcher.current = undefined;
+    return returnedValue;
+  }
+
+  function useRef<T>(initialValue: T): MutableRefObject<T>;
+  function useRef<T>(initialValue: T|null): RefObject<T>;
+  function useRef<T = undefined>(): MutableRefObject<T | undefined>;
+  function useRef<T>(initial?: T): MutableRefObject<T> {
+    const hook = useWorkInProgress<MutableRefObject<T>>();
+    if (!hook.memoizedState) {
+      hook.memoizedState = {
+        current: initial
+      };
+    }
+    return hook.memoizedState;
+  }
+
+  function useMemo<T>(nextCreate: () => T, deps?: unknown[]): T {
+    const hook = useWorkInProgress<[T, unknown[]]>();
+    if (hook.memoizedState && deps && areHookInputsEqual(deps, hook.memoizedState[1])) {
+      return hook.memoizedState[0];
+    }
+    const next = nextCreate();
+    hook.memoizedState = [
+      next,
+      deps
+    ];
+    return next;
+  }
+
+  function useCallback<T extends () => void>(nextCallback: T, deps?: unknown[]): T {
+    const hook = useWorkInProgress<[T, unknown[]]>();
+    if (hook.memoizedState && deps && areHookInputsEqual(deps, hook.memoizedState[1])) {
+      return hook.memoizedState[0];
+    }
+    hook.memoizedState = [
+      nextCallback,
+      deps
+    ];
+    return nextCallback;
+  }
+
+  function useEffect(create: EffectCallback, deps?: unknown[]) {
+    const hook = useWorkInProgress<WorkInProgressHookEffect>();
+    if (hook.memoizedState && deps && areHookInputsEqual(deps, hook.memoizedState.deps)) {
+      return hook.memoizedState;
+    }
+    hook.memoizedState = pushEffect(0, create, hook.memoizedState?.destroy, deps);
+  }
+
+  function useState<S>(initialState: S | (() => S)): [S, Dispatch<SetStateAction<S>>];
+  function useState<S = undefined>(): [S | undefined, Dispatch<SetStateAction<S | undefined>>];
+  function useState<S>(initialState?: (() => S) | S): [S, Dispatch<SetStateAction<S>>] {
+    const hook = useWorkInProgress<S, WorkInProgressHookQueue<S, SetStateAction<S>>>();
+    if (!hook.queue) {
+      const state = hook.baseState = hook.memoizedState = isStateFn(initialState) ? initialState() : initialState;
+      hook.queue = {
+        lanes: 0,
+        lastRenderedReducer: basicStateReducer,
+        lastRenderedState: state,
+      };
+      hook.queue.dispatch = dispatchAction.bind(undefined, hook);
+    }
+    return [hook.memoizedState, hook.queue.dispatch];
+
+    function isStateFn<S>(initialState: (() => S) | S): initialState is (() => S) {
+      return typeof initialState === "function";
+    }
+  }
+
+  function useReducer<R extends ReducerWithoutAction<unknown>, I>(
+    reducer: R,
+    initializerArg: I,
+    initializer: (arg: I) => ReducerStateWithoutAction<R>
+  ): [ReducerStateWithoutAction<R>, DispatchWithoutAction];
+  function useReducer<R extends ReducerWithoutAction<unknown>>(
+    reducer: R,
+    initializerArg: ReducerStateWithoutAction<R>,
+    initializer?: undefined
+  ): [ReducerStateWithoutAction<R>, DispatchWithoutAction];
+  function useReducer<R extends Reducer<unknown, unknown>, I>(
+    reducer: R,
+    initializerArg: I & ReducerState<R>,
+    initializer: (arg: I & ReducerState<R>) => ReducerState<R>
+  ): [ReducerState<R>, Dispatch<ReducerAction<R>>];
+  function useReducer<R extends Reducer<unknown, unknown>, I>(
+    reducer: R,
+    initializerArg: I,
+    initializer: (arg: I) => ReducerState<R>
+  ): [ReducerState<R>, Dispatch<ReducerAction<R>>];
+  function useReducer<R extends Reducer<unknown, unknown>>(
+    reducer: R,
+    initialState: ReducerState<R>,
+    initializer?: undefined
+  ): [ReducerState<R>, Dispatch<ReducerAction<R>>];
+  function useReducer<R extends Reducer<unknown, unknown>, I = undefined>(
+    reducer: unknown,
+    initialStateOrArg: unknown,
+    initializer: unknown
+  ): [ReducerState<R>, Dispatch<ReducerAction<R>>] {
+    type S = ReducerState<R>;
+    type A = ReducerAction<R>;
+    assertReducer(reducer);
+    const hook = useWorkInProgress<S, WorkInProgressHookQueue<S, A>>();
+    if (!hook.queue) {
+      const initialState = getInitialState();
+      hook.queue = {
+        lanes: 0,
+        lastRenderedReducer: reducer,
+        lastRenderedState: initialState
+      };
+      hook.queue.dispatch = dispatchAction.bind(undefined, hook);
+      hook.memoizedState = initialState;
+    }
+    return [hook.memoizedState, hook.queue.dispatch];
+
+    function assertReducer(value: unknown): asserts value is Reducer<S, A> {
+      if (typeof value !== "function" || value !== reducer) {
+        throw new Error("Expected reducer");
+      }
+    }
+
+    function getInitialState(): S {
+      if (isInitializer(initializer) && isInitializerArg(initialStateOrArg)) {
+        return initializer(initialStateOrArg);
+      }
+      if (isStateArg(initialStateOrArg)) {
+        return initialStateOrArg;
+      }
+      return undefined;
+    }
+
+    function isStateArg(value: unknown): value is S {
+      return value === initialStateOrArg && typeof initializer !== "function";
+    }
+
+    function isInitializerArg(value: unknown): value is I {
+      return value === initialStateOrArg && typeof initializer === "function";
+    }
+
+    function isInitializer(value: unknown): value is (arg: I) => ReducerState<R> {
+      return value === initializer && typeof value === "function";
+    }
+  }
+
+  function dispatchAction<S, A>(
+    hook: WorkInProgressHook<S, WorkInProgressHookQueue<S, A>>,
+    action: A
+  ) {
+    updateQueue.add(() => {
+      const currentState = hook.memoizedState;
+      const nextState = hook.queue.lastRenderedReducer(currentState, action);
+      if (Object.is(nextState, currentState)) {
+        return;
+      }
+      hook.memoizedState = nextState;
+    });
+  }
+
+  function basicStateReducer<S>(state: S, action: SetStateAction<S>): S {
+    return isSetStateFn(action) ? action(state) : action;
+  }
+
+  function isSetStateFn<S>(initialState: SetStateAction<S>): initialState is ((state: S) => S) {
+    return typeof initialState === "function";
+  }
+
+
+  function areHookInputsEqual(nextDeps: unknown[], previousDeps?: unknown[]) {
+    if (!previousDeps) {
+      return false;
+    }
+    if (nextDeps.length !== previousDeps.length) {
+      return false;
+    }
+    for (let i = 0; i < previousDeps.length && i < nextDeps.length; i++) {
+      if (Object.is(nextDeps[i], previousDeps[i])) {
+        continue;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  function pushEffect(tag: number, create: EffectCallback, destroy: Destructor, deps?: unknown[]): WorkInProgressHookEffect {
+    const effect: WorkInProgressHookEffect = {
+      tag,
+      create,
+      destroy,
+      deps
+    };
+    if (!componentUpdateQueue) {
+      componentUpdateQueue = createFunctionComponentUpdateQueue();
+      componentUpdateQueue.lastEffect = effect.next = effect;
+    } else {
+      const lastEffect = componentUpdateQueue.lastEffect;
+      if (lastEffect) {
+        const firstEffect = lastEffect.next;
+        lastEffect.next = effect;
+        effect.next = firstEffect;
+        componentUpdateQueue.lastEffect = effect;
+      } else {
+        componentUpdateQueue.lastEffect = effect.next = effect;
+      }
+    }
+    return effect;
+  }
+
+
+  function createFunctionComponentUpdateQueue(): FunctionComponentUpdateQueue {
+    return {
+      lastEffect: undefined,
+    };
+  }
+
+  function useWorkInProgress<MemoizedState, Queue = unknown>(): WorkInProgressHook<MemoizedState, Queue> {
+    const index = hookIndex += 1;
+    const current = hooks[index];
+    if (isWorkInProgressHook(current)) {
+      return current;
+    }
+    const hook: WorkInProgressHook<MemoizedState, Queue> = {};
+    hooks[index] = hook;
+    return hook;
+
+    function isWorkInProgressHook(current: unknown): current is WorkInProgressHook<MemoizedState, Queue> {
+      return !!current;
+    }
+
+  }
+}
+
+export function map(react: ReactElement): VNode {
+  const context = {};
+  return mapInternal(react);
+
+  function mapInternal(element: ReactElement): VNode {
+    const { type, props } = element;
+    if (typeof type === "function") {
+      return createVNodeWithContext(context, () => React({ [REACT_TREE]: true }, { reference: Fragment, source: type, options: props || {} }));
+    } else {
+      return createSourceNode(type);
+    }
+    async function *mapChildren(children: unknown): AsyncIterable<ReadonlyArray<VNode>> {
+      return yield asVNode(children);
+
+      function asVNode(source: ReactElement | ReactNode | SourceReference): VNode[] {
+        if (typeof source === "undefined") {
+          return [];
+        }
+        if (isSourceReference(source)) {
+          // Bypass rest of the jazz
+          return [createVNodeWithContext({}, source)];
+        }
+        if (isReactNodeArray(source)) {
+          return reduce(source);
+        }
+        if (isReactElement(source)) {
+          return [map(source)];
+        }
+        console.log({ source });
+        return [];
+      }
+
+      // Typescript doesn't like reducing react node -> vnode ???
+      function reduce(input: Iterable<ReactNode>): VNode[] {
+        const nodes: VNode[] = [];
+        for (const value of input) {
+          nodes.push(...asVNode(value));
+        }
+        return nodes;
+      }
+
+      function isReactNodeArray(source: ReactElement | ReactNode | SourceReference): source is Iterable<ReactNode> {
+        return isIterable(source);
+      }
+    }
+    function createSourceNode(source: string): NativeOptionsVNode {
+      return {
+        source,
+        reference: props.key || Symbol("React"),
+        options: {
+          type: "Element"
+        },
+        children: mapChildren(props.children)
+      };
+    }
+  }
+}
+
+function assertSharedInternalsPresent(value: unknown): asserts value is {
+  __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED: SharedInternals
+} {
+  function isSharedInternalsPresentLike(value: unknown): value is {
+    __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED: unknown
+  } {
+    return !!value;
+  }
+  if (!(isSharedInternalsPresentLike(value) && value.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED)) {
+    throw new Error("Expected to be fired!");
+  }
+}
+
+function isReactElement(value: unknown): value is ReactElement {
+  function isReactElementLike(value: unknown): value is { type: unknown } {
+    return !!value;
+  }
+  return (
+    isReactElementLike(value) &&
+    (
+      typeof value.type === "function" ||
+      typeof value.type === "string"
+    )
+  );
+}
