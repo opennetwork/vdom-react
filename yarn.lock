@@ -23,20 +23,20 @@
   resolved "https://registry.npmjs.org/@opennetwork/progressive-merge/-/progressive-merge-4.0.4.tgz#c564f1367bfe34f92e37b3465f375a808d905535"
   integrity sha512-OxqJur/+aNpDTDz+xFxuC+oJOiLWwE358tq1ZZNcHFvJs4pgAO410+dmpMNnhIv2JJUPqRHQyur435tlDqCvHQ==
 
-"@opennetwork/vdom@^8.1.0":
-  version "8.1.0"
-  resolved "https://registry.npmjs.org/@opennetwork/vdom/-/vdom-8.1.0.tgz#89bdc74878d61f82a2adf14037582cf407e3bdec"
-  integrity sha512-tZPJzrq6/tnjjNYcLwT8Vi9uhER8GCiv0rhzl+E8yuVMGYA7yVbTeTbSpDh2hTT7Ki+HRpG5KULe+iLFPGZLGA==
+"@opennetwork/vdom@^8.3.2":
+  version "8.3.2"
+  resolved "https://registry.npmjs.org/@opennetwork/vdom/-/vdom-8.3.2.tgz#8a84fc89adbb60849eeebcbc7a19ee47847c5a0c"
+  integrity sha512-fEGrGrWC5u/dnXDoBNYSyQrm2NZQZ/djQNoJjE+OG6zsMkbO1cPUWC/OwSCsMx5RrR0lhPjfg3G67wDH+sAoLg==
 
 "@opennetwork/vnode-hooks@^6.0.0":
   version "6.0.0"
   resolved "https://registry.npmjs.org/@opennetwork/vnode-hooks/-/vnode-hooks-6.0.0.tgz#6c49801ab4f992fe89637aebba6fbd0d5190439f"
   integrity sha512-f293RTv4/nGD5bl/SLFMtOfxQDC4NvA2Xmk06GEHNHndPPP89/Q0aNBpzeUADSr6VeIp8IbkaebzRS3mU6elBg==
 
-"@opennetwork/vnode@^18.1.0":
-  version "18.1.1"
-  resolved "https://registry.npmjs.org/@opennetwork/vnode/-/vnode-18.1.1.tgz#b05b4aa35f4e3827901974dbef04f1394ee86bbf"
-  integrity sha512-blreKvKe16HNdTCrbTRMwzYtffn0IPQufWg8EkWyI25B6GBbVwcXVxXeonh0h9QBoh7vUxzxX/opReXkZGn9uA==
+"@opennetwork/vnode@^18.1.2":
+  version "18.1.2"
+  resolved "https://registry.npmjs.org/@opennetwork/vnode/-/vnode-18.1.2.tgz#6ac3841a4d67a99b799d7cf42f9ebd511df3092b"
+  integrity sha512-qiou8gtTtCLAl+W+Zy1RC2FozNZi1Sol8U3Gpcakm93sOczXgh/2d+UTHys81N1JbFw2FloVvBvyGRHNTY5obA==
 
 "@types/node@^14.14.35":
   version "14.14.35"

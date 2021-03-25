@@ -14,12 +14,12 @@
   },
   "peerDependencies": {
     "@opennetwork/progressive-merge": "^4.0.4",
-    "@opennetwork/vnode": "^15.1.0",
+    "@opennetwork/vnode": "^18.1.2",
     "iterable": "^5.7.0",
     "microtask-collector": "^1.0.4"
   },
   "dependencies": {
-    "@opennetwork/vdom": "^8.1.0",
+    "@opennetwork/vdom": "^8.3.2",
     "@opennetwork/vnode-hooks": "^6.0.0",
     "react": "^17.0.2",
     "react-reconciler": "^0.26.2"
@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@opennetwork/progressive-merge": "^4.0.4",
-    "@opennetwork/vnode": "^18.1.0",
+    "@opennetwork/vnode": "^18.1.2",
     "@types/node": "^14.14.35",
     "@types/react": "^17.0.3",
     "esm": "^3.2.25",

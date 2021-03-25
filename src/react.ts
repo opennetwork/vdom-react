@@ -4,7 +4,7 @@ import {
   SourceReferenceRepresentationFactory,
   VNode
 } from "@opennetwork/vnode";
-import { NativeOptionsVNode } from "@opennetwork/vdom";
+import { NativeAttributes, NativeOptionsVNode, setAttributes } from "@opennetwork/vdom";
 import { SourceReferenceRepresentation } from "@opennetwork/vnode/src/source";
 import {
   Destructor,
@@ -33,11 +33,12 @@ import {
   Consumer as ReactConsumer,
   ProviderExoticComponent,
   ProviderProps,
-  createContext, createElement, Context
+  createContext
 } from "react";
 import * as NoNo from "react";
-import { isIterable } from "iterable";
+import { isIterable, isPromise } from "iterable";
 import { Collector } from "microtask-collector";
+import { isElement } from "@opennetwork/vdom";
 
 const dummyContext = createContext(undefined);
 const ReactProviderSymbol = dummyContext.Provider.$$typeof;
@@ -65,8 +66,13 @@ export interface ReactOptions extends Record<string, unknown> {
   [REACT_CONTEXT]?: ReactContextMap;
 }
 
+interface DeferredAction {
+  (): void | Promise<void>;
+}
+type DeferredActionCollector = Collector<DeferredAction, ReadonlyArray<DeferredAction>>;
+
 export function React(options: ReactOptions, node: VNode): ReactVNode {
-  type Props = { __isProps: typeof PROPS_BRAND };
+  type Props = { __isProps: typeof PROPS_BRAND } & Record<string, unknown>;
 
   const reactContext: ReactContextMap = options[REACT_CONTEXT] || new Map();
 
@@ -76,12 +82,10 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
   const hooks: unknown[] = [];
   let hookIndex = -1;
   let queue: Promise<void> = Promise.resolve();
+  let previousProps: Props | undefined = undefined;
+  // let previousElement: Element | undefined = undefined;
 
-  interface DeferredAction {
-    (): void | Promise<void>;
-  }
-
-  const updateQueue = new Collector<DeferredAction, ReadonlyArray<DeferredAction>>({
+  const updateQueue: DeferredActionCollector = new Collector<DeferredAction, ReadonlyArray<DeferredAction>>({
     map: Object.freeze
   });
 
@@ -127,7 +131,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
           yield Object.freeze([]);
         } else {
           assertReactElement(latestValue);
-          yield Object.freeze([map(reactContext, latestValue)]);
+          yield Object.freeze([map(updateQueue, reactContext, latestValue)]);
         }
       } catch (error) {
         console.error({ error });
@@ -138,7 +142,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
 
     } while (!updateQueueIterationResult.done);
 
-    destroyHookEffectList(0);
+    await destroyHookEffectList(0);
   }
 
   async function cycle(source: SourceReferenceRepresentationFactory<Props>, props: Props) {
@@ -147,17 +151,19 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     componentUpdateQueue = undefined;
 
     const latestValue = await renderWithHooks(source, props);
+
     if (hookIndex === -1) {
       // We are rendering only, no hooks utilised
       return latestValue;
     }
 
-    commitHookEffectList(0);
+    await commitHookEffectList(0);
 
+    previousProps = props;
     return latestValue;
   }
 
-  function commitHookEffectList(tag: number) {
+  async function commitHookEffectList(tag: number) {
     if (!componentUpdateQueue?.lastEffect) return;
     const firstEffect = componentUpdateQueue.lastEffect.next;
     let effect = firstEffect;
@@ -165,20 +171,20 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
       if ((effect.tag & tag) === tag) {
         const create = effect.create;
         effect.destroy?.();
-        const destroy = create();
+        const destroy = await create();
         effect.destroy = destroy ? destroy : undefined;
       }
       effect = effect.next;
     } while (effect !== firstEffect);
   }
 
-  function destroyHookEffectList(tag: number) {
+  async function destroyHookEffectList(tag: number) {
     if (!componentUpdateQueue?.lastEffect) return;
     const firstEffect = componentUpdateQueue.lastEffect.next;
     let effect = firstEffect;
     do {
       if ((effect.tag & tag) === tag) {
-        effect.destroy?.();
+        await effect.destroy?.();
         effect.destroy = undefined;
       }
       effect = effect.next;
@@ -229,7 +235,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     return undefined;
   }
 
-  function useContext<T>(context: Context<T>): T {
+  function useContext<T>(context: ReactContext<T>): T {
     return readContext(context);
 
     function readContext(context: unknown): T {
@@ -480,18 +486,16 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
   }
 }
 
-export function map(reactContext: ReactContextMap, element: unknown): VNode {
+export function map(collector: DeferredActionCollector, reactContext: ReactContextMap, element: unknown): VNode {
   const context = {};
 
   if (isReactContextConsumerElement(element)) {
-    console.log("Consumer", element);
     const foundContext = reactContext.get(element.type._context);
     const result = element.props.children(foundContext?.currentValue);
     if (result) {
-      return map(reactContext, result);
+      return map(collector, reactContext, result);
     }
   } else if (isReactContextProviderElement(element)) {
-    console.log("Provider", element);
     const nextReactContext = new Map(reactContext);
     nextReactContext.set(element.type._context, {
       currentValue: element.props.value
@@ -529,9 +533,8 @@ export function map(reactContext: ReactContextMap, element: unknown): VNode {
         return reduce(source);
       }
       if (isReactElement(source)) {
-        return [map(childrenReactContext, source)];
+        return [map(collector, childrenReactContext, source)];
       }
-      console.log({ source });
       return [];
     }
 
@@ -548,17 +551,141 @@ export function map(reactContext: ReactContextMap, element: unknown): VNode {
       return isIterable(source);
     }
   }
-  function createSourceNode({ props }: ReactElement, source: string): NativeOptionsVNode {
-    return {
+  function createSourceNode({ props, key }: ReactElement, source: string): NativeOptionsVNode {
+    const node: NativeOptionsVNode = {
       source,
-      reference: props.key || Symbol("React"),
+      reference: key || Symbol("React"),
       options: {
-        type: "Element"
+        type: "Element",
+        async onBeforeRender(documentNode: Element & ProxiedListeners | Text) {
+          if (!isElement(documentNode)) return;
+          documentNode._collector = documentNode._collector ?? collector;
+          const attributes: NativeAttributes = {};
+          let hasAttribute = false;
+          for (const key of Object.keys(props)) {
+            if (key === "key" || key === "children") {
+              // These are react specific props, they also trigger warnings on read
+              continue;
+            }
+            const value = props[key];
+            if (key === "value" || key === "checked") {
+              // Do nothing, use defaultValue or defaultChecked attribute
+            } else if (key === "class" || key === "className") {
+              if (typeof value === "string") {
+                documentNode.className = value;
+              } else {
+                documentNode.className = "";
+              }
+            } else if (key === "dangerouslySetInnerHTML") {
+              documentNode.innerHTML = props["dangerouslySetInnerHTML"];
+            } else if (key === "style") {
+              // TODO
+              // if (typeof value === "string") {
+              //   assertStyleText(documentNode.style);
+              //   documentNode.style.cssText = value;
+              // } else {
+              //   // TODO
+              // }
+            } else if (key.startsWith("on")) {
+              const keyWithoutCapture = key.replace(/Capture$/, "");
+              const useCapture = keyWithoutCapture !== key;
+              let name = keyWithoutCapture;
+              if (name.toLowerCase() in documentNode) {
+                name = name.toLowerCase();
+              }
+              name = name.slice(2);
+              const handler = useCapture ? eventProxyCapture : eventProxy;
+              if (typeof value === "function") {
+                documentNode._listeners = documentNode._listeners ?? {};
+                documentNode._listeners[name + useCapture] = value;
+                documentNode.addEventListener(name, handler, useCapture);
+              } else {
+                documentNode.removeEventListener(name, handler, useCapture);
+              }
+            } else if (
+              isDocumentNodeKey(key) &&
+              !isReadOnlyDocumentKey(key)
+            ) {
+              const documentNodeMap: Record<keyof Element, unknown> = documentNode;
+              try {
+                documentNodeMap[key] = value;
+                continue;
+              } catch {
+
+              }
+            }
+            if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || typeof value === "undefined" || value === null) {
+              let name = key;
+              if (key === "htmlFor") name = "for";
+              attributes[key] = value;
+              hasAttribute = true;
+            }
+          }
+          if (hasAttribute) {
+            await setAttributes({
+              ...node,
+              options: {
+                ...node.options,
+                attributes
+              }
+            }, documentNode);
+          }
+
+          function isDocumentNodeKey<K>(key: K): key is K & keyof Element {
+            return key in documentNode;
+          }
+
+        }
       },
       children: mapChildren(props.children)
     };
+    return node;
   }
 }
+
+const readOnlyElementKeys = {
+  href: 1,
+  list: 1,
+  form: 1,
+  tabIndex: 1,
+  download: 1,
+};
+
+function isReadOnlyDocumentKey(key: string): key is keyof typeof readOnlyElementKeys {
+  const keys: Record<string, number> = readOnlyElementKeys;
+  return !!keys[key];
+}
+
+export interface ProxiedListeners {
+  _listeners?: Record<string, (event: Event) => void>;
+  _collector?: Collector<DeferredAction, ReadonlyArray<DeferredAction>>;
+}
+
+function eventProxy(this: ProxiedListeners, event: Event) {
+  scopedEvent.call(this, event, false);
+}
+
+function eventProxyCapture(this: ProxiedListeners, event: Event) {
+  scopedEvent.call(this, event, true);
+}
+
+function scopedEvent(this: ProxiedListeners, event: Event, useCapture: boolean) {
+  if (!this._listeners) {
+    return;
+  }
+  const fn = this._listeners?.[event.type + useCapture];
+  if (typeof fn === "function") {
+    const result = fn(event);
+    console.log({ result, promise: isPromise(result) });
+    if (isPromise(result)) {
+      const action: DeferredAction & { priority?: number, render?: boolean } = () => result;
+      action.priority = 1;
+      action.render = false;
+      this._collector?.add(action);
+    }
+  }
+}
+
 
 function assertSharedInternalsPresent(value: unknown): asserts value is {
   __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED: SharedInternals

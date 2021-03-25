@@ -41,7 +41,16 @@ function A() {
 
   console.log(`A: ${state}`);
 
-  return createElement("b", { key: "stable" }, `A: ${state}`)
+  const onClick = useCallback(async () => {
+    console.log("clicked!")
+
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    console.log("After click");
+
+  }, [])
+
+  return createElement("b", { key: "stable", onClick, id: "clickable" }, `A: ${state}`)
 }
 
 async function Z() {
@@ -70,11 +79,7 @@ function Component() {
   //   console.log("to to")
   // }, [index]))
 
-  return createElement(Inside);
-
-  async function Inside() {
-    return createElement(WithProvider);
-  }
+  return createElement(A);
 }
 
 const context = new DOMVContext({
@@ -92,10 +97,21 @@ try {
   console.error(e);
 }
 
-
+var usedElement = undefined;
 
 async function log() {
   for await (const event of context.events.hydrate) {
     console.log(window.document.body.outerHTML)
+
+    const element = window.document.getElementById("clickable");
+
+    if (element && !usedElement) {
+      usedElement = element;
+
+      const event = window.document.createEvent("HTMLEvents");
+      event.initEvent("click", false, true);
+      element.dispatchEvent(event);
+    }
+
   }
 }
