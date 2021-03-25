@@ -170,7 +170,10 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
       for (const update of updateQueueIterationResult?.value ?? []) {
         await update();
       }
-      updateQueueIterationResult = undefined;
+      if (!updateQueueIterationResult?.done) {
+        // Clear for next loop
+        updateQueueIterationResult = undefined;
+      }
 
     } while (!updateQueueIterationResult?.done);
 
