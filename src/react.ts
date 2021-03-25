@@ -146,22 +146,25 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
         }
       }
 
-      updateQueueIterationPromise = updateQueueIterationPromise || updateQueueIterator.next()
-        .then((result) => {
-          updateQueueIterationResult = result;
-        });
+      if (!updateQueueIterationResult) {
+        updateQueueIterationPromise = updateQueueIterationPromise || updateQueueIterator.next()
+          .then((result) => {
+            updateQueueIterationResult = result;
+            updateQueueIterationPromise = undefined;
+          });
+      }
 
-      if (suspendedPromise) {
+      if (suspendedPromise && updateQueueIterationPromise) {
         await Promise.any([
           suspendedPromise,
           updateQueueIterationPromise
         ]);
-      } else {
+      } else if (updateQueueIterationPromise) {
         await updateQueueIterationPromise;
-      }
-
-      if (updateQueueIterationResult) {
         updateQueueIterationPromise = undefined;
+      } else if (suspendedPromise) {
+        await suspendedPromise;
+        suspendedPromise = undefined;
       }
 
       for (const update of updateQueueIterationResult?.value ?? []) {
