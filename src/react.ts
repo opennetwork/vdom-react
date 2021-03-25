@@ -158,6 +158,9 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
         ]);
       } else {
         await updateQueueIterationPromise;
+      }
+
+      if (updateQueueIterationResult) {
         updateQueueIterationPromise = undefined;
       }
 
