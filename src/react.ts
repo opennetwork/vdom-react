@@ -117,7 +117,6 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
   async function *cycleChildren(source: SourceReferenceRepresentationFactory<Props>): AsyncIterable<ReadonlyArray<VNode>> {
     const updateQueueIterator = updateQueue[Symbol.asyncIterator]();
     let updateQueueIterationResult: IteratorResult<ReadonlyArray<DeferredAction>> | undefined = undefined;
-    let updateQueueIterationPromise: Promise<typeof updateQueueIterationResult> | undefined = undefined;
 
     const knownErrors = new WeakSet<typeof suspendedPromise>();
 
@@ -152,15 +151,12 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
         }
       }
 
-      updateQueueIterationPromise = updateQueueIterator.next();
+      updateQueueIterationResult = await updateQueueIterator.next();
 
       if (suspendedPromise) {
         await suspendedPromise;
         suspendedPromise = undefined;
       }
-
-      updateQueueIterationResult = await updateQueueIterationPromise;
-      updateQueueIterationPromise = undefined;
 
     } while (!updateQueueIterationResult?.done);
 
