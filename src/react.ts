@@ -84,6 +84,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
   let hookIndex = -1;
   let queue: Promise<void> = Promise.resolve();
   let previousProps: Props | undefined = undefined;
+  let suspendedPromise: Promise<unknown> | undefined = undefined;
   // let previousElement: Element | undefined = undefined;
 
   const updateQueue: DeferredActionCollector = new Collector<DeferredAction, ReadonlyArray<DeferredAction>>({
@@ -116,12 +117,16 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
   async function *cycleChildren(source: SourceReferenceRepresentationFactory<Props>): AsyncIterable<ReadonlyArray<VNode>> {
     const updateQueueIterator = updateQueue[Symbol.asyncIterator]();
     let updateQueueIterationResult: IteratorResult<ReadonlyArray<DeferredAction>> | undefined = undefined;
+    let updateQueueIterationPromise: Promise<typeof updateQueueIterationResult> | undefined = undefined;
+
+    const knownErrors = new WeakSet<typeof suspendedPromise>();
 
     do {
 
       for (const update of updateQueueIterationResult?.value ?? []) {
         await update();
       }
+      updateQueueIterationResult = undefined;
 
       try {
         const latestValue = await cycle(source, currentProps);
@@ -135,13 +140,29 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
           yield Object.freeze([map(updateQueue, reactContext, latestValue)]);
         }
       } catch (error) {
-        console.error({ error });
-        await Promise.reject(error);
+        if (isPromise(error)) {
+          // If we are here, and we know this error, it was already thrown and resolved
+          if (!knownErrors.has(error)) {
+            suspendedPromise = error;
+            knownErrors.add(error);
+          }
+        } else {
+          console.error({ error });
+          await Promise.reject(error);
+        }
       }
 
-      updateQueueIterationResult = await updateQueueIterator.next();
+      updateQueueIterationPromise = updateQueueIterator.next();
 
-    } while (!updateQueueIterationResult.done);
+      if (suspendedPromise) {
+        await suspendedPromise;
+        suspendedPromise = undefined;
+      }
+
+      updateQueueIterationResult = await updateQueueIterationPromise;
+      updateQueueIterationPromise = undefined;
+
+    } while (!updateQueueIterationResult?.done);
 
     await destroyHookEffectList(0);
   }

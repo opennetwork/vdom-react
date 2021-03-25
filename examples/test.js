@@ -23,6 +23,14 @@ let index = 0;
 function A() {
   const [state, onState] = useReducer((state) => state + 1, 1, undefined);
 
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  const promise = useMemo(async () => {
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    setIsLoaded(true);
+  }, [setIsLoaded]);
+
+  if (!isLoaded) throw promise;
 
   useEffect(() => {
     console.log("interval");
