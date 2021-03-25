@@ -30,12 +30,18 @@ import { Collector } from "microtask-collector";
 const REACT_TREE = Symbol("React Tree");
 const PROPS_BRAND = Symbol("Props");
 
+export interface ReactVNode extends VNode {
+  options: {
+    setProps(props: object): void;
+  };
+  children: AsyncIterable<ReadonlyArray<NativeOptionsVNode | VNode & { native?: unknown }>>;
+}
 
 export interface ReactOptions extends Record<string, unknown> {
   [REACT_TREE]?: boolean;
 }
 
-export async function *React(options: ReactOptions, node: VNode): AsyncIterable<NativeOptionsVNode | VNode & { native?: unknown }> {
+export function React(options: ReactOptions, node: VNode): ReactVNode {
   type Props = { __isProps: typeof PROPS_BRAND };
 
   assertSharedInternalsPresent(NoNo);
@@ -61,29 +67,46 @@ export async function *React(options: ReactOptions, node: VNode): AsyncIterable<
   assertFunction(source);
   assertFragment(reference);
 
-  const updateQueueIterator = updateQueue[Symbol.asyncIterator]();
-  let updateQueueIterationResult: IteratorResult<ReadonlyArray<DeferredAction>> | undefined = undefined;
+  let currentProps: Props = props;
 
-  do {
+  return {
+    reference: Fragment,
+    options: {
+      setProps(props: object) {
+        assertProps(props);
+        updateQueue.add(() => {
+          currentProps = props;
+        });
+      }
+    },
+    children: cycleChildren(source)
+  };
 
-    for (const update of updateQueueIterationResult?.value ?? []) {
-      await update();
-    }
+  async function *cycleChildren(source: SourceReferenceRepresentationFactory<Props>): AsyncIterable<ReadonlyArray<VNode>> {
+    const updateQueueIterator = updateQueue[Symbol.asyncIterator]();
+    let updateQueueIterationResult: IteratorResult<ReadonlyArray<DeferredAction>> | undefined = undefined;
 
-    const latestValue = await cycle(source, props);
-    if (hookIndex === -1 && !options[REACT_TREE]) {
-      yield createVNodeWithContext({}, latestValue);
-    }
-    if (!latestValue) {
-      yield undefined;
-    } else {
-      assertLatestValueReactElement(latestValue);
-      yield map(latestValue);
-    }
+    do {
 
-    updateQueueIterationResult = await updateQueueIterator.next();
+      for (const update of updateQueueIterationResult?.value ?? []) {
+        await update();
+      }
 
-  } while (!updateQueueIterationResult.done);
+      const latestValue = await cycle(source, currentProps);
+      if (hookIndex === -1 && !options[REACT_TREE]) {
+        yield Object.freeze([createVNodeWithContext({}, latestValue)]);
+      }
+      if (!latestValue) {
+        yield Object.freeze([]);
+      } else {
+        assertLatestValueReactElement(latestValue);
+        yield Object.freeze([map(latestValue)]);
+      }
+
+      updateQueueIterationResult = await updateQueueIterator.next();
+
+    } while (!updateQueueIterationResult.done);
+  }
 
   function assertLatestValueReactElement(latestValue: unknown): asserts latestValue is ReactElement {
     if (!isReactElement(latestValue)) {
