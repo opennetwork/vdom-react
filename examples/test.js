@@ -1,8 +1,21 @@
 import dom from "./jsdom.js";
 import { React as ReactWrapper } from "../dist/index.js";
 import {Fragment} from "@opennetwork/vnode";
-import {useEffect, useMemo, useRef, useCallback, createElement, useState, useReducer} from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useCallback,
+  createElement,
+  useState,
+  useReducer,
+  createContext,
+  useContext
+} from "react";
 import {render, DOMVContext} from "@opennetwork/vdom";
+
+const Context = createContext(0);
+const { Provider, Consumer } = Context;
 
 let index = 0;
 
@@ -35,16 +48,33 @@ async function Z() {
   return createElement("strong", {}, "Z")
 }
 
+function WithConsumer() {
+  const value = useContext(Context);
+  return createElement("p", {}, `${typeof value}: ${value}`);
+}
+
+function WithProvider() {
+  return createElement(
+    Provider,
+    { value: 1 },
+    createElement(WithConsumer)
+  );
+}
+
 function Component() {
 
   console.log(useRef())
-  console.log(useMemo(() => index += 1, [index]));
-  console.log(useCallback(() => index, [])())
-  console.log(useEffect(() => {
-    console.log("to to")
-  }, [index]))
+  // console.log(useMemo(() => index += 1, [index]));
+  // console.log(useCallback(() => index, [])())
+  // console.log(useEffect(() => {
+  //   console.log("to to")
+  // }, [index]))
 
-  return createElement("p", { key: "stable" }, createElement(A), "test", createElement(Z), "Another");
+  return createElement(Inside);
+
+  async function Inside() {
+    return createElement(WithProvider);
+  }
 }
 
 const context = new DOMVContext({

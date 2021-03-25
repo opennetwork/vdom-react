@@ -15,19 +15,36 @@ import {
   WorkInProgressHookQueue,
 } from "react-reconciler";
 import {
-  Dispatch, DispatchWithoutAction,
+  Dispatch,
+  DispatchWithoutAction,
   EffectCallback,
   MutableRefObject,
   ReactElement,
-  ReactNode, Reducer, ReducerAction, ReducerState, ReducerStateWithoutAction, ReducerWithoutAction,
+  ReactNode,
+  Reducer,
+  ReducerAction,
+  ReducerState,
+  ReducerStateWithoutAction,
+  ReducerWithoutAction,
   RefObject,
   SetStateAction,
+  Context as ReactContext,
+  Provider as ReactProvider,
+  Consumer as ReactConsumer,
+  ProviderExoticComponent,
+  ProviderProps,
+  createContext, createElement, Context
 } from "react";
 import * as NoNo from "react";
 import { isIterable } from "iterable";
 import { Collector } from "microtask-collector";
 
+const dummyContext = createContext(undefined);
+const ReactProviderSymbol = dummyContext.Provider.$$typeof;
+const ReactConsumerSymbol = dummyContext.Consumer.$$typeof;
+
 const REACT_TREE = Symbol("React Tree");
+const REACT_CONTEXT = Symbol("React Context");
 const PROPS_BRAND = Symbol("Props");
 
 export interface ReactVNode extends VNode {
@@ -37,12 +54,21 @@ export interface ReactVNode extends VNode {
   children: AsyncIterable<ReadonlyArray<NativeOptionsVNode | VNode & { native?: unknown }>>;
 }
 
+export interface ReactContextDescriptor<T = unknown> {
+  currentValue: T;
+}
+
+export type ReactContextMap = Map<ReactContext<unknown>, ReactContextDescriptor>;
+
 export interface ReactOptions extends Record<string, unknown> {
   [REACT_TREE]?: boolean;
+  [REACT_CONTEXT]?: ReactContextMap;
 }
 
 export function React(options: ReactOptions, node: VNode): ReactVNode {
   type Props = { __isProps: typeof PROPS_BRAND };
+
+  const reactContext: ReactContextMap = options[REACT_CONTEXT] || new Map();
 
   assertSharedInternalsPresent(NoNo);
   const { __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED: SharedInternals } = NoNo;
@@ -92,26 +118,27 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
         await update();
       }
 
-      const latestValue = await cycle(source, currentProps);
-      if (hookIndex === -1 && !options[REACT_TREE]) {
-        yield Object.freeze([createVNodeWithContext({}, latestValue)]);
-      }
-      if (!latestValue) {
-        yield Object.freeze([]);
-      } else {
-        assertLatestValueReactElement(latestValue);
-        yield Object.freeze([map(latestValue)]);
+      try {
+        const latestValue = await cycle(source, currentProps);
+        if (hookIndex === -1 && !options[REACT_TREE]) {
+          yield Object.freeze([createVNodeWithContext({}, latestValue)]);
+        }
+        if (!latestValue) {
+          yield Object.freeze([]);
+        } else {
+          assertReactElement(latestValue);
+          yield Object.freeze([map(reactContext, latestValue)]);
+        }
+      } catch (error) {
+        console.error({ error });
+        await Promise.reject(error);
       }
 
       updateQueueIterationResult = await updateQueueIterator.next();
 
     } while (!updateQueueIterationResult.done);
-  }
 
-  function assertLatestValueReactElement(latestValue: unknown): asserts latestValue is ReactElement {
-    if (!isReactElement(latestValue)) {
-      throw new Error("Expected ReactElement");
-    }
+    destroyHookEffectList(0);
   }
 
   async function cycle(source: SourceReferenceRepresentationFactory<Props>, props: Props) {
@@ -137,8 +164,22 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     do {
       if ((effect.tag & tag) === tag) {
         const create = effect.create;
+        effect.destroy?.();
         const destroy = create();
         effect.destroy = destroy ? destroy : undefined;
+      }
+      effect = effect.next;
+    } while (effect !== firstEffect);
+  }
+
+  function destroyHookEffectList(tag: number) {
+    if (!componentUpdateQueue?.lastEffect) return;
+    const firstEffect = componentUpdateQueue.lastEffect.next;
+    let effect = firstEffect;
+    do {
+      if ((effect.tag & tag) === tag) {
+        effect.destroy?.();
+        effect.destroy = undefined;
       }
       effect = effect.next;
     } while (effect !== firstEffect);
@@ -173,12 +214,42 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
       useLayoutEffect: useEffect,
       useState,
       useReducer,
+      useContext,
+      useDebugValue: noop,
+      useImperativeHandle: noop,
     };
 
     const returnedValue = source(props, { reference: Fragment, children: node.children } );
     SharedInternals.ReactCurrentOwner.current = undefined;
     SharedInternals.ReactCurrentDispatcher.current = undefined;
     return returnedValue;
+  }
+
+  function noop(): void {
+    return undefined;
+  }
+
+  function useContext<T>(context: Context<T>): T {
+    return readContext(context);
+
+    function readContext(context: unknown): T {
+      assertReactContext(context);
+      const found = reactContext.get(context);
+      if (!isReactContextDescriptor(found)) {
+        return undefined;
+      }
+      return found.currentValue;
+
+      function isReactContextDescriptor(value: unknown): value is ReactContextDescriptor<T> {
+        return !!value && value === found;
+      }
+
+      function assertReactContext(value: unknown): asserts value is ReactContext<unknown> {
+        if (!isReactContext(value)) {
+          throw new Error("Expected React Context");
+        }
+      }
+    }
   }
 
   function useRef<T>(initialValue: T): MutableRefObject<T>;
@@ -409,61 +480,83 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
   }
 }
 
-export function map(react: ReactElement): VNode {
+export function map(reactContext: ReactContextMap, element: unknown): VNode {
   const context = {};
-  return mapInternal(react);
 
-  function mapInternal(element: ReactElement): VNode {
+  if (isReactContextConsumerElement(element)) {
+    console.log("Consumer", element);
+    const foundContext = reactContext.get(element.type._context);
+    const result = element.props.children(foundContext?.currentValue);
+    if (result) {
+      return map(reactContext, result);
+    }
+  } else if (isReactContextProviderElement(element)) {
+    console.log("Provider", element);
+    const nextReactContext = new Map(reactContext);
+    nextReactContext.set(element.type._context, {
+      currentValue: element.props.value
+    });
+    return {
+      reference: Fragment,
+      options: {
+        context: element.type._context,
+        value: element.props.value
+      },
+      children: mapChildren(element.props.children, nextReactContext)
+    };
+  } else if (isReactElement(element)) {
     const { type, props } = element;
     if (typeof type === "function") {
-      return createVNodeWithContext(context, () => React({ [REACT_TREE]: true }, { reference: Fragment, source: type, options: props || {} }));
+      return createVNodeWithContext(context, () => React({ [REACT_TREE]: true, [REACT_CONTEXT]: reactContext }, { reference: Fragment, source: type, options: props || {} }));
     } else {
-      return createSourceNode(type);
+      return createSourceNode(element, type);
     }
-    async function *mapChildren(children: unknown): AsyncIterable<ReadonlyArray<VNode>> {
-      return yield asVNode(children);
+  }
+  return { reference: Fragment, source: element };
 
-      function asVNode(source: ReactElement | ReactNode | SourceReference): VNode[] {
-        if (typeof source === "undefined") {
-          return [];
-        }
-        if (isSourceReference(source)) {
-          // Bypass rest of the jazz
-          return [createVNodeWithContext({}, source)];
-        }
-        if (isReactNodeArray(source)) {
-          return reduce(source);
-        }
-        if (isReactElement(source)) {
-          return [map(source)];
-        }
-        console.log({ source });
+  async function *mapChildren(children: unknown, childrenReactContext: ReactContextMap = reactContext): AsyncIterable<ReadonlyArray<VNode>> {
+    return yield asVNode(children);
+
+    function asVNode(source: ReactElement | ReactNode | SourceReference): VNode[] {
+      if (typeof source === "undefined") {
         return [];
       }
-
-      // Typescript doesn't like reducing react node -> vnode ???
-      function reduce(input: Iterable<ReactNode>): VNode[] {
-        const nodes: VNode[] = [];
-        for (const value of input) {
-          nodes.push(...asVNode(value));
-        }
-        return nodes;
+      if (isSourceReference(source)) {
+        // Bypass rest of the jazz
+        return [createVNodeWithContext({}, source)];
       }
-
-      function isReactNodeArray(source: ReactElement | ReactNode | SourceReference): source is Iterable<ReactNode> {
-        return isIterable(source);
+      if (isReactNodeArray(source)) {
+        return reduce(source);
       }
+      if (isReactElement(source)) {
+        return [map(childrenReactContext, source)];
+      }
+      console.log({ source });
+      return [];
     }
-    function createSourceNode(source: string): NativeOptionsVNode {
-      return {
-        source,
-        reference: props.key || Symbol("React"),
-        options: {
-          type: "Element"
-        },
-        children: mapChildren(props.children)
-      };
+
+    // Typescript doesn't like reducing react node -> vnode ???
+    function reduce(input: Iterable<ReactNode>): VNode[] {
+      const nodes: VNode[] = [];
+      for (const value of input) {
+        nodes.push(...asVNode(value));
+      }
+      return nodes;
     }
+
+    function isReactNodeArray(source: ReactElement | ReactNode | SourceReference): source is Iterable<ReactNode> {
+      return isIterable(source);
+    }
+  }
+  function createSourceNode({ props }: ReactElement, source: string): NativeOptionsVNode {
+    return {
+      source,
+      reference: props.key || Symbol("React"),
+      options: {
+        type: "Element"
+      },
+      children: mapChildren(props.children)
+    };
   }
 }
 
@@ -488,7 +581,75 @@ function isReactElement(value: unknown): value is ReactElement {
     isReactElementLike(value) &&
     (
       typeof value.type === "function" ||
-      typeof value.type === "string"
+      typeof value.type === "string" ||
+      isReactContextConsumerElement(value) ||
+      isReactContextProviderElement(value)
     )
   );
+}
+
+function isReactContextProviderElement<T = unknown>(value: unknown): value is ReactElement<{ value: T, children?: ReactNode }, ReactProviderWithContext<T>> {
+  function isReactContextProviderElementLike(value: unknown): value is { type: unknown } {
+    return !!value;
+  }
+  return isReactContextProviderElementLike(value) && isReactContextProvider(value.type);
+}
+
+interface ReactProviderWithContext<T> extends ReactProvider<T> {
+  _context: ReactContext<T>;
+}
+
+function isReactContextProvider<T = unknown>(value: unknown): value is ReactProviderWithContext<T> {
+  function isReactContextProviderLike(value: unknown): value is Partial<ProviderExoticComponent<ProviderProps<T>>> {
+    return !!value;
+  }
+  return (
+    isReactContextProviderLike(value) &&
+    value.$$typeof === ReactProviderSymbol
+  );
+}
+
+function isReactContextConsumerElement<T = unknown>(value: unknown): value is ReactElement<{ children(value: T): ReactNode }, ReactConsumerWithContext<T>> {
+  function isReactContextConsumerElementLike(value: unknown): value is { type: unknown } {
+    return !!value;
+  }
+  return isReactContextConsumerElementLike(value) && isReactContextConsumer(value.type);
+}
+
+interface ReactConsumerWithContext<T> extends ReactConsumer<T> {
+  _context: ReactContext<T>;
+}
+
+function isReactContextConsumer<T = unknown>(value: unknown): value is ReactConsumerWithContext<T> {
+  function isReactContextConsumerLike(value: unknown): value is Partial<ProviderExoticComponent<ProviderProps<T>>> {
+    return !!value;
+  }
+  return (
+    isReactContextConsumerLike(value) &&
+    value.$$typeof === ReactConsumerSymbol
+  );
+}
+
+function isReactContext<T = unknown>(value: unknown): value is ReactContext<T> & {
+  $$type: symbol,
+  _calculateChangedBits?: (a: T, b: T) => number,
+  _currentValue: T,
+  _currentValue2?: T
+} {
+  function isReactContextLike(value: unknown): value is { Provider: unknown, Consumer: unknown, displayName: unknown } {
+    return !!value;
+  }
+  return (
+    isReactContextLike(value) &&
+    isReactContextConsumer(value.Consumer) &&
+    isReactContextProvider(value.Provider) &&
+    (!value.displayName || typeof value.displayName === "string")
+  );
+}
+
+
+function assertReactElement(value: unknown): asserts value is ReactElement {
+  if (!isReactElement(value)) {
+    throw new Error("Expected ReactElement");
+  }
 }
