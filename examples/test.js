@@ -57,7 +57,7 @@ function A() {
     ReactFragment,
     {},
     createElement("b", { key: "stable", onClick, id: "clickable", ref }, `A: ${state}`),
-    createElement("c", { }, `D: ${state}`)
+    createElement("a", { href: "https://example.com", target: "_blank" }, `D: ${state}`)
   )
 }
 

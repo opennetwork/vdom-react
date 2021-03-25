@@ -676,6 +676,7 @@ const readOnlyElementKeys = {
   form: 1,
   tabIndex: 1,
   download: 1,
+  target: 1,
 };
 
 function isReadOnlyDocumentKey(key: string): key is keyof typeof readOnlyElementKeys {
