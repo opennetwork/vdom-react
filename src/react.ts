@@ -84,7 +84,6 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
   let hookIndex = -1;
   let queue: Promise<void> = Promise.resolve();
   let previousProps: Props | undefined = undefined;
-  let suspendedPromise: Promise<unknown> | undefined = undefined;
   // let previousElement: Element | undefined = undefined;
 
   const updateQueue: DeferredActionCollector = new Collector<DeferredAction, ReadonlyArray<DeferredAction>>({
@@ -117,11 +116,9 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
   async function *cycleChildren(source: SourceReferenceRepresentationFactory<Props>): AsyncIterable<ReadonlyArray<VNode>> {
     const updateQueueIterator = updateQueue[Symbol.asyncIterator]();
     let updateQueueIterationResult: IteratorResult<ReadonlyArray<DeferredAction>> | undefined = undefined;
-    let updateQueueIterationPromise: Promise<void> | undefined = undefined;
-    const knownErrors = new WeakSet<typeof suspendedPromise>();
+    const knownErrors = new WeakSet<Promise<unknown>>();
 
     do {
-      updateQueueIterationResult = undefined;
       try {
         const latestValue = await cycle(source, currentProps);
         if (hookIndex === -1 && !options[REACT_TREE]) {
@@ -137,45 +134,20 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
         if (isPromise(error)) {
           // If we are here, and we know this error, it was already thrown and resolved
           if (!knownErrors.has(error)) {
-            suspendedPromise = error.then(() => suspendedPromise = undefined);
+            updateQueue.add(() => error);
             knownErrors.add(error);
           }
+          // Else we already know about it and it is in our update queue
         } else {
           console.error({ error });
           await Promise.reject(error);
         }
       }
-
-      if (!updateQueueIterationResult) {
-        updateQueueIterationPromise = updateQueueIterationPromise || updateQueueIterator.next()
-          .then((result) => {
-            updateQueueIterationResult = result;
-            updateQueueIterationPromise = undefined;
-          });
-      }
-
-      if (suspendedPromise && updateQueueIterationPromise) {
-        await Promise.any([
-          suspendedPromise,
-          updateQueueIterationPromise
-        ]);
-      } else if (updateQueueIterationPromise) {
-        await updateQueueIterationPromise;
-        updateQueueIterationPromise = undefined;
-      } else if (suspendedPromise) {
-        await suspendedPromise;
-        suspendedPromise = undefined;
-      }
-
-      for (const update of updateQueueIterationResult?.value ?? []) {
+      updateQueueIterationResult = await updateQueueIterator.next();
+      for (const update of updateQueueIterationResult.value ?? []) {
         await update();
       }
-      if (!updateQueueIterationResult?.done) {
-        // Clear for next loop
-        updateQueueIterationResult = undefined;
-      }
-
-    } while (!updateQueueIterationResult?.done);
+    } while (!updateQueueIterationResult.done);
 
     await destroyHookEffectList(0);
   }
