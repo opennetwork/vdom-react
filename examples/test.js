@@ -106,6 +106,7 @@ const logPromise = log();
 try {
 
   await render(ReactWrapper({}, { reference: Fragment, source: Component, options: {} }), context);
+  await context.close();
   await logPromise;
   console.log("Finished rendering");
   console.log(window.document.body.outerHTML)

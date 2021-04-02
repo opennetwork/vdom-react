@@ -1,5 +1,5 @@
 import {
-  createVNodeWithContext,
+  createVNode,
   Fragment, isSourceReference, SourceReference,
   SourceReferenceRepresentationFactory,
   VNode
@@ -122,7 +122,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
       try {
         const latestValue = await cycle(source, currentProps);
         if (hookIndex === -1 && !options[REACT_TREE]) {
-          yield Object.freeze([createVNodeWithContext({}, latestValue)]);
+          yield Object.freeze([createVNode(latestValue)]);
         }
         if (!latestValue) {
           yield Object.freeze([]);
@@ -526,7 +526,7 @@ export function map(collector: DeferredActionCollector, reactContext: ReactConte
         children: mapChildren(element.props.children, reactContext)
       };
     } else if (typeof type === "function") {
-      return createVNodeWithContext(context, () => React({ [REACT_TREE]: true, [REACT_CONTEXT]: reactContext }, { reference: Fragment, source: type, options: props || {} }));
+      return createVNode(() => React({ [REACT_TREE]: true, [REACT_CONTEXT]: reactContext }, { reference: Fragment, source: type, options: props || {} }));
     } else {
       return createSourceNode(element, type);
     }
@@ -542,7 +542,7 @@ export function map(collector: DeferredActionCollector, reactContext: ReactConte
       }
       if (isSourceReference(source)) {
         // Bypass rest of the jazz
-        return [createVNodeWithContext({}, source)];
+        return [createVNode(source)];
       }
       if (isReactNodeArray(source)) {
         return reduce(source);
