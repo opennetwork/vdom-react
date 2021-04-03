@@ -1,11 +1,10 @@
 import {
   createVNode,
-  Fragment, isSourceReference, SourceReference,
+  Fragment, isSourceReference, isVNode, SourceReference,
   SourceReferenceRepresentationFactory,
   VNode
 } from "@opennetwork/vnode";
 import { NativeAttributes, NativeOptionsVNode, setAttributes } from "@opennetwork/vdom";
-import { SourceReferenceRepresentation } from "@opennetwork/vnode/src/source";
 import {
   Destructor,
   FunctionComponentUpdateQueue,
@@ -34,7 +33,9 @@ import {
   ProviderExoticComponent,
   ProviderProps,
   createContext,
-  Fragment as ReactFragment
+  Fragment as ReactFragment,
+  Component as ReactComponent,
+  ComponentClass as ReactComponentClass, PropsWithChildren
 } from "react";
 import * as NoNo from "react";
 import { isIterable, isPromise } from "iterable";
@@ -47,6 +48,7 @@ const ReactConsumerSymbol = dummyContext.Consumer.$$typeof;
 
 const REACT_TREE = Symbol("React Tree");
 const REACT_CONTEXT = Symbol("React Context");
+const REACT_ERROR_BOUNDARY = Symbol("React Error Boundary");
 const PROPS_BRAND = Symbol("Props");
 
 export interface ReactVNode extends VNode {
@@ -65,17 +67,16 @@ export type ReactContextMap = Map<ReactContext<unknown>, ReactContextDescriptor>
 export interface ReactOptions extends Record<string, unknown> {
   [REACT_TREE]?: boolean;
   [REACT_CONTEXT]?: ReactContextMap;
+  [REACT_ERROR_BOUNDARY]?(error: unknown): void;
 }
 
 interface DeferredAction {
-  (): void | Promise<void>;
+  (): unknown;
 }
 type DeferredActionCollector = Collector<DeferredAction, ReadonlyArray<DeferredAction>>;
 
 export function React(options: ReactOptions, node: VNode): ReactVNode {
   type Props = { __isProps: typeof PROPS_BRAND } & Record<string, unknown>;
-
-  const reactContext: ReactContextMap = options[REACT_CONTEXT] || new Map();
 
   assertSharedInternalsPresent(NoNo);
   const { __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED: SharedInternals } = NoNo;
@@ -85,6 +86,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
   let queue: Promise<void> = Promise.resolve();
   let previousProps: Props | undefined = undefined;
   // let previousElement: Element | undefined = undefined;
+  const instance = new Map<ReactComponentClass<Props, unknown>, InstanceType<ReactComponentClass<Props, unknown>>>();
 
   const updateQueue: DeferredActionCollector = new Collector<DeferredAction, ReadonlyArray<DeferredAction>>({
     map: Object.freeze
@@ -116,43 +118,71 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
   async function *cycleChildren(source: SourceReferenceRepresentationFactory<Props>): AsyncIterable<ReadonlyArray<VNode>> {
     const updateQueueIterator = updateQueue[Symbol.asyncIterator]();
     let updateQueueIterationResult: IteratorResult<ReadonlyArray<DeferredAction>> | undefined = undefined;
-    const knownErrors = new WeakSet<Promise<unknown>>();
+    const knownPromiseErrors = new WeakSet<Promise<unknown>>();
 
-    do {
+    cycle: do {
       try {
-        const latestValue = await cycle(source, currentProps);
+        const [latestValue, childrenOptions] = await cycle(source, currentProps);
         if (hookIndex === -1 && !options[REACT_TREE]) {
-          yield Object.freeze([createVNode(latestValue)]);
+          if (isVNode(latestValue) || isSourceReference(latestValue)) {
+            yield Object.freeze([createVNode(latestValue)]);
+          } else {
+            yield Object.freeze([]);
+          }
         }
         if (!latestValue) {
           yield Object.freeze([]);
         } else {
           assertReactElement(latestValue);
-          yield Object.freeze([map(updateQueue, reactContext, latestValue)]);
+          yield Object.freeze([map(updateQueue, childrenOptions, latestValue)]);
         }
       } catch (error) {
-        if (isPromise(error)) {
-          // If we are here, and we know this error, it was already thrown and resolved
-          if (!knownErrors.has(error)) {
-            updateQueue.add(() => error);
-            knownErrors.add(error);
-          }
-          // Else we already know about it and it is in our update queue
-        } else {
-          console.error({ error });
-          await Promise.reject(error);
+        if (await onError(error)) {
+          break;
         }
       }
       updateQueueIterationResult = await updateQueueIterator.next();
       for (const update of updateQueueIterationResult.value ?? []) {
-        await update();
+        try {
+          await update();
+        } catch (error) {
+          if (await onError(error)) {
+            break cycle;
+          }
+        }
       }
     } while (!updateQueueIterationResult.done);
 
     await destroyHookEffectList(0);
+
+    async function onError(error: unknown): Promise<boolean> {
+      if (isPromise(error)) {
+        const promiseError: Promise<unknown> = error;
+        // If we are here, and we know this error, it was already thrown and resolved
+        // Else we already know about it and it is in our update queue
+        if (!knownPromiseErrors.has(error)) {
+          updateQueue.add(() => promiseError);
+          knownPromiseErrors.add(error);
+        }
+        return false;
+      }
+      else if (options[REACT_ERROR_BOUNDARY]) {
+        await options[REACT_ERROR_BOUNDARY](error);
+      }
+      else {
+        console.log({ options });
+        await updateQueueIterator.return();
+        throw error;
+      }
+      return true;
+    }
   }
 
-  async function cycle(source: SourceReferenceRepresentationFactory<Props>, props: Props) {
+  async function cycle(source: SourceReferenceRepresentationFactory<Props>, props: Props): Promise<[unknown, ReactOptions]>  {
+    if (isReactComponent<Props, Record<string, unknown>>(source)) {
+      return cycleComponent(source, props);
+    }
+
     queue = Promise.resolve();
     hookIndex = -1;
     componentUpdateQueue = undefined;
@@ -161,13 +191,50 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
 
     if (hookIndex === -1) {
       // We are rendering only, no hooks utilised
-      return latestValue;
+      return [latestValue, options];
     }
 
     await commitHookEffectList(0);
 
     previousProps = props;
-    return latestValue;
+    return [latestValue, options];
+  }
+
+  async function cycleComponent(source: ReactComponentClass<Props, unknown>, props: Props): Promise<[unknown, ReactOptions]>  {
+    const currentInstance = instance.get(source);
+    if (!currentInstance) {
+      const newInstance = new source(props);
+      instance.set(source, newInstance);
+      return cycleComponent(source, props);
+    }
+
+    if (!isReactErrorBoundaryInstance(currentInstance)) {
+      return undefined; // Nothing to do, not supported yet
+    }
+
+    const childrenOptions: ReactOptions = {
+      ...options
+    };
+
+    if (isReactErrorBoundaryInstance(currentInstance)) {
+      childrenOptions[REACT_ERROR_BOUNDARY] = onErrorBoundary.bind(undefined, currentInstance);
+    }
+
+    return [currentInstance.render(), childrenOptions];
+  }
+
+  async function onErrorBoundary<S>(instance: ReactErrorBoundaryClass<Props, S>, error: unknown) {
+    const nextState = instance.getDerivedStateFromError?.(error);
+    if (typeof nextState !== "undefined") {
+      // TODO component state
+    }
+    instance.componentDidCatch?.(error, {
+      componentStack: isErrorStackLike(error) ? error.stack ?? "" : ""
+    });
+
+    function isErrorStackLike(error: unknown): error is { stack: unknown } {
+      return !!error;
+    }
   }
 
   async function commitHookEffectList(tag: number) {
@@ -216,7 +283,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     }
   }
 
-  async function renderWithHooks(source: SourceReferenceRepresentationFactory<Props>, props: Props): Promise<SourceReferenceRepresentation<Props>> {
+  async function renderWithHooks(source: (props: Props, children: VNode) => unknown, props: Props): Promise<unknown> {
     hookIndex = -1;
 
     SharedInternals.ReactCurrentDispatcher.current = {
@@ -247,7 +314,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
 
     function readContext(context: unknown): T {
       assertReactContext(context);
-      const found = reactContext.get(context);
+      const found = options[REACT_CONTEXT]?.get(context);
       if (!isReactContextDescriptor(found)) {
         return undefined;
       }
@@ -493,17 +560,15 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
   }
 }
 
-export function map(collector: DeferredActionCollector, reactContext: ReactContextMap, element: unknown): VNode {
-  const context = {};
-
+export function map(collector: DeferredActionCollector, options: Partial<ReactOptions>, element: unknown): VNode {
   if (isReactContextConsumerElement(element)) {
-    const foundContext = reactContext.get(element.type._context);
+    const foundContext = options[REACT_CONTEXT]?.get(element.type._context);
     const result = element.props.children(foundContext?.currentValue);
     if (result) {
-      return map(collector, reactContext, result);
+      return map(collector, options, result);
     }
   } else if (isReactContextProviderElement(element)) {
-    const nextReactContext = new Map(reactContext);
+    const nextReactContext = new Map(options[REACT_CONTEXT]);
     nextReactContext.set(element.type._context, {
       currentValue: element.props.value
     });
@@ -514,7 +579,10 @@ export function map(collector: DeferredActionCollector, reactContext: ReactConte
         value: element.props.value
       },
       source: element,
-      children: mapChildren(element.props.children, nextReactContext)
+      children: mapChildren(element.props.children, {
+        ...options,
+        [REACT_CONTEXT]: nextReactContext
+      })
     };
   } else if (isReactElement(element)) {
     const { type, props } = element;
@@ -523,17 +591,17 @@ export function map(collector: DeferredActionCollector, reactContext: ReactConte
         reference: Fragment,
         options: {},
         source: element,
-        children: mapChildren(element.props.children, reactContext)
+        children: mapChildren(element.props.children, options)
       };
     } else if (typeof type === "function") {
-      return createVNode(() => React({ [REACT_TREE]: true, [REACT_CONTEXT]: reactContext }, { reference: Fragment, source: type, options: props || {} }));
+      return createVNode(() => React({ [REACT_TREE]: true, ...options }, { reference: Fragment, source: type, options: props || {} }));
     } else {
       return createSourceNode(element, type);
     }
   }
   return { reference: Fragment, source: element };
 
-  async function *mapChildren(children: unknown, childrenReactContext: ReactContextMap = reactContext): AsyncIterable<ReadonlyArray<VNode>> {
+  async function *mapChildren(children: unknown, options: Partial<ReactOptions>): AsyncIterable<ReadonlyArray<VNode>> {
     return yield asVNode(children);
 
     function asVNode(source: ReactElement | ReactNode | SourceReference): VNode[] {
@@ -548,7 +616,7 @@ export function map(collector: DeferredActionCollector, reactContext: ReactConte
         return reduce(source);
       }
       if (isReactElement(source)) {
-        return [map(collector, childrenReactContext, source)];
+        return [map(collector, options, source)];
       }
       return [];
     }
@@ -670,7 +738,7 @@ export function map(collector: DeferredActionCollector, reactContext: ReactConte
 
         }
       },
-      children: mapChildren(props.children)
+      children: mapChildren(props.children, options)
     };
     return node;
   }
@@ -744,6 +812,7 @@ function isReactElement(value: unknown): value is ReactElement {
       typeof value.type === "string" ||
       isReactContextConsumerElement(value) ||
       isReactContextProviderElement(value) ||
+      isReactErrorBoundaryElement(value) ||
       value.type === ReactFragment
     )
   );
@@ -813,4 +882,39 @@ function assertReactElement(value: unknown): asserts value is ReactElement {
   if (!isReactElement(value)) {
     throw new Error("Expected ReactElement");
   }
+}
+
+function isReactComponent<T, S extends object = Record<string, unknown>>(value: unknown): value is ReactComponentClass<T, S> {
+  function isPrototypeLike(value: unknown): value is { prototype: unknown } {
+    return typeof value === "function";
+  }
+  return (
+    isPrototypeLike(value) &&
+    value.prototype instanceof ReactComponent
+  );
+}
+
+function isReactErrorBoundaryInstance<P, S>(value: ReactComponent<P, S>): value is InstanceType<ReactErrorBoundaryClass<P, S>> {
+  function isReactErrorBoundaryLike(value: unknown): value is Record<string, unknown> {
+    return !!value;
+  }
+  return (
+    isReactErrorBoundaryLike(value) &&
+    (
+      typeof value.getDerivedStateFromError === "function" ||
+      typeof value.componentDidCatch === "function"
+    )
+  );
+}
+
+function isReactErrorBoundaryElement<P, S>(value: unknown): value is ReactElement<PropsWithChildren<P>, ReactErrorBoundaryClass<P, S>> {
+  function isReactContextProviderElementLike(value: unknown): value is { type: unknown } {
+    return !!value;
+  }
+  return isReactContextProviderElementLike(value) && isReactContextProvider(value.type);
+}
+
+interface ReactErrorBoundaryClass<P, S> extends ReactComponentClass<P, S> {
+  getDerivedStateFromError?(error: unknown): S | undefined;
+  componentDidCatch?(error: unknown, errorInfo: unknown): void;
 }
