@@ -10,17 +10,50 @@ import {
   useState,
   useReducer,
   createContext,
-  useContext, useLayoutEffect,
-  Fragment as ReactFragment
+  useContext,
+  Fragment as ReactFragment,
+  Component as ReactComponent
 } from "react";
 import {render, DOMVContext} from "@opennetwork/vdom";
 
 const Context = createContext(0);
 const { Provider, Consumer } = Context;
 
-let index = 0;
+
+class ErrorBoundary extends ReactComponent {
+
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error) {
+    // Update state so the next render will show the fallback UI.
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    // You can also log the error to an error reporting service
+    console.log("Caught", error, errorInfo);
+
+    setTimeout(() => {
+      this.setState({ hasError: false });
+    }, 2000)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      // You can render any custom fallback UI
+      return createElement("h1", {}, "Something went wrong.")
+    }
+
+    return this.props.children;
+  }
+
+}
 
 function A() {
+
   const [state, onState] = useReducer((state) => state + 1, 1, undefined);
 
   const [isLoaded, setIsLoaded] = useState(false);
@@ -33,15 +66,13 @@ function A() {
   if (!isLoaded) throw promise;
 
   useEffect(() => {
-    console.log("interval");
     let count = 0;
     const interval = setInterval(() => {
-      console.log("set state");
-      count += 1;
-      if (count > 3) {
+      if ((count += 1) > 3) {
         clearInterval(interval);
+      } else {
+        onState();
       }
-      onState();
     }, 300);
     return () => {
       clearInterval(interval);
@@ -56,6 +87,7 @@ function A() {
     await new Promise(resolve => setTimeout(resolve, 1500));
 
     console.log("After click");
+
 
   }, [])
 
@@ -95,13 +127,21 @@ function Component() {
   //   console.log("to to")
   // }, [index]))
 
-  return createElement(A);
+  return createElement(
+    ErrorBoundary,
+    {},
+    createElement(A)
+  );
 }
 
 const context = new DOMVContext({
   root: dom.window.document.body
 });
 const logPromise = log();
+
+process.on("uncaughtException", console.log.bind("uncaughtException"))
+process.on("unhandledRejection", console.log.bind("unhandledRejection"))
+process.on("warning", console.log.bind("warning"))
 
 try {
 

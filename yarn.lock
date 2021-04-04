@@ -18,10 +18,10 @@
     esutils "^2.0.2"
     js-tokens "^4.0.0"
 
-"@opennetwork/progressive-merge@^5.0.1":
-  version "5.0.1"
-  resolved "https://registry.npmjs.org/@opennetwork/progressive-merge/-/progressive-merge-5.0.1.tgz#52380eeeceea38883baf472cd2de6278049a077a"
-  integrity sha512-Cs5u9yIvH9tmMuqLcPH9bhX6r0OWh/DN/FEFjQffd1Cka6GDX9JEXosFTKb3a5iqouSj9USBlzJacL13MdQlvw==
+"@opennetwork/progressive-merge@^5.0.2":
+  version "5.0.2"
+  resolved "https://registry.npmjs.org/@opennetwork/progressive-merge/-/progressive-merge-5.0.2.tgz#9e8c7e6b082d32fdc507eaeaa2d1e44cbf659655"
+  integrity sha512-pSeGNAvWkpdZkD2pf5xXfYidT5O0yvUPVRxax2ONeA+N4iNRTnv9CSH+f8DA3SgQGNcc6wKhmdTffdw2xuSQ8w==
 
 "@opennetwork/vdom@^10.1.0":
   version "10.1.0"
@@ -607,10 +607,10 @@ loose-envify@^1.1.0:
   dependencies:
     js-tokens "^3.0.0 || ^4.0.0"
 
-microtask-collector@^1.0.4:
-  version "1.0.4"
-  resolved "https://registry.npmjs.org/microtask-collector/-/microtask-collector-1.0.4.tgz#c92751f5171d55477cae7b613435b735b326fdd3"
-  integrity sha512-j49//GFbQnRTZSrKgmgp5q1SAewmr9+ZQ4+Ta6jf7CS29Z8POqNrI99X3ztz1SZqFjr9kMzZQjy7+T1X33KgIA==
+microtask-collector@^1.0.5:
+  version "1.0.5"
+  resolved "https://registry.npmjs.org/microtask-collector/-/microtask-collector-1.0.5.tgz#7bc4dae99dfacc4b66459867f11db8939291c97e"
+  integrity sha512-lXyuOvxWDCdHw0lU8VA9XjywgaQauX9XlW9NvUwNTxGH7e7Ppoo6vS9h6uYMnWGfPCBzySv2EL4MLgyu2YLnKg==
 
 mime-db@1.46.0:
   version "1.46.0"
