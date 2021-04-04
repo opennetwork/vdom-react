@@ -8,6 +8,7 @@ import { NativeAttributes, NativeOptionsVNode, setAttributes } from "@opennetwor
 import {
   Destructor,
   FunctionComponentUpdateQueue,
+  ReactDispatcher,
   SharedInternals,
   WorkInProgressHook,
   WorkInProgressHookEffect,
@@ -35,7 +36,7 @@ import {
   createContext,
   Fragment as ReactFragment,
   Component as ReactComponent,
-  ComponentClass as ReactComponentClass, PropsWithChildren
+  ComponentClass as ReactComponentClass, PropsWithChildren, ErrorInfo
 } from "react";
 import * as NoNo from "react";
 import { isIterable, isPromise } from "iterable";
@@ -50,6 +51,26 @@ const REACT_TREE = Symbol("React Tree");
 const REACT_CONTEXT = Symbol("React Context");
 const REACT_ERROR_BOUNDARY = Symbol("React Error Boundary");
 const PROPS_BRAND = Symbol("Props");
+
+export const DISPATCHER = Symbol("✨ Dispatcher ✨");
+
+export function dispatcher(props: unknown): ReactDispatcher {
+  assertDispatcherProps(props);
+  return props[DISPATCHER];
+
+  function assertDispatcherProps(props: unknown): asserts props is { [DISPATCHER]: ReactDispatcher } {
+    function isDispatcherPropsLike(props: unknown): props is { [DISPATCHER]: unknown } {
+      return !!props;
+    }
+    if (
+      isDispatcherPropsLike(props) &&
+      !!props[DISPATCHER]
+    ) {
+      return;
+    }
+    throw new Error("Expected dispatcher");
+  }
+}
 
 export interface ReactVNode extends VNode {
   options: {
@@ -67,7 +88,7 @@ export type ReactContextMap = Map<ReactContext<unknown>, ReactContextDescriptor>
 export interface ReactOptions extends Record<string, unknown> {
   [REACT_TREE]?: boolean;
   [REACT_CONTEXT]?: ReactContextMap;
-  [REACT_ERROR_BOUNDARY]?(error: unknown): void;
+  [REACT_ERROR_BOUNDARY]?(error: unknown): boolean;
 }
 
 interface DeferredAction {
@@ -94,51 +115,84 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
 
   let componentUpdateQueue: FunctionComponentUpdateQueue | undefined = undefined;
 
+  const dispatcher = {
+    useRef,
+    useMemo,
+    useCallback,
+    useEffect,
+    useLayoutEffect: useEffect,
+    useState,
+    useReducer,
+    useContext,
+    useDebugValue: noop,
+    useImperativeHandle: noop,
+  };
+
   const { source, reference, options: props = {} } = node;
 
   assertProps(props);
   assertFunction(source);
   assertFragment(reference);
 
-  let currentProps: Props = props;
+  let currentProps: Props = props,
+    previousState: unknown = undefined,
+    currentStateChange = Symbol(),
+    previousStateChange = Symbol();
+  setCurrentProps(props);
+
+  const cycleHookIndexStart = hookIndex;
 
   return {
     reference: Fragment,
     options: {
-      setProps(props: object) {
-        assertProps(props);
-        updateQueue.add(() => {
-          currentProps = props;
-        });
-      }
+      setProps
     },
-    children: cycleChildren(source)
+    children: renderGenerator(source)
   };
 
-  async function *cycleChildren(source: SourceReferenceRepresentationFactory<Props>): AsyncIterable<ReadonlyArray<VNode>> {
+  function setProps(props: object) {
+    updateQueue.add(setCurrentProps.bind(undefined, props));
+  }
+
+  function setCurrentProps(props: object) {
+    assertProps(props);
+    if (Object.isExtensible(props)) {
+      Object.defineProperty(props, DISPATCHER, {
+        value: dispatcher
+      });
+    }
+    currentProps = props;
+  }
+
+  async function *renderGenerator(source: SourceReferenceRepresentationFactory<Props>): AsyncIterable<ReadonlyArray<VNode>> {
     const updateQueueIterator = updateQueue[Symbol.asyncIterator]();
     let updateQueueIterationResult: IteratorResult<ReadonlyArray<DeferredAction>> | undefined = undefined;
     const knownPromiseErrors = new WeakSet<Promise<unknown>>();
 
     cycle: do {
-      try {
-        const [latestValue, childrenOptions] = await cycle(source, currentProps);
-        if (hookIndex === -1 && !options[REACT_TREE]) {
-          if (isVNode(latestValue) || isSourceReference(latestValue)) {
-            yield Object.freeze([createVNode(latestValue)]);
-          } else {
-            yield Object.freeze([]);
+      if (previousProps !== currentProps || previousStateChange !== currentStateChange) {
+        try {
+          const [latestValue, childrenOptions] = await render(source, currentProps);
+          previousProps = currentProps;
+          previousStateChange = currentStateChange;
+          if (hookIndex === -1 && !options[REACT_TREE]) {
+            if (isVNode(latestValue) || isSourceReference(latestValue)) {
+              yield Object.freeze([createVNode(latestValue)]);
+            } else {
+              yield Object.freeze([]);
+            }
           }
-        }
-        if (!latestValue) {
-          yield Object.freeze([]);
-        } else {
-          assertReactElement(latestValue);
-          yield Object.freeze([map(updateQueue, childrenOptions, latestValue)]);
-        }
-      } catch (error) {
-        if (await onError(error)) {
-          break;
+          if (!latestValue) {
+            yield Object.freeze([]);
+          } else {
+            assertReactElement(latestValue);
+            yield Object.freeze([map(updateQueue, childrenOptions, latestValue)]);
+          }
+        } catch (error) {
+          if (await onError(error)) {
+            console.log("Breaking cycle 1", error);
+            break;
+          }
         }
       }
       updateQueueIterationResult = await updateQueueIterator.next();
@@ -147,10 +201,12 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
           await update();
         } catch (error) {
           if (await onError(error)) {
+            console.log("Breaking cycle 2", error);
             break cycle;
           }
         }
       }
+
     } while (!updateQueueIterationResult.done);
 
     await destroyHookEffectList(0);
@@ -167,29 +223,27 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
         return false;
       }
       else if (options[REACT_ERROR_BOUNDARY]) {
-        await options[REACT_ERROR_BOUNDARY](error);
+        return options[REACT_ERROR_BOUNDARY](error);
       }
       else {
-        console.log({ options });
-        await updateQueueIterator.return();
+        await updateQueueIterator.return?.();
         throw error;
       }
-      return true;
     }
   }
 
-  async function cycle(source: SourceReferenceRepresentationFactory<Props>, props: Props): Promise<[unknown, ReactOptions]>  {
-    if (isReactComponent<Props, Record<string, unknown>>(source)) {
-      return cycleComponent(source, props);
-    }
-
+  async function render(source: SourceReferenceRepresentationFactory<Props>, props: Props): Promise<[unknown, ReactOptions]>  {
     queue = Promise.resolve();
-    hookIndex = -1;
+    hookIndex = cycleHookIndexStart;
     componentUpdateQueue = undefined;
 
-    const latestValue = await renderWithHooks(source, props);
+    if (isReactComponent<Props, Record<string, unknown>>(source)) {
+      return renderComponent(source, props);
+    }
 
-    if (hookIndex === -1) {
+    const latestValue = await renderFunction(source, props);
+
+    if (hookIndex === cycleHookIndexStart) {
       // We are rendering only, no hooks utilised
       return [latestValue, options];
     }
@@ -200,41 +254,61 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     return [latestValue, options];
   }
 
-  async function cycleComponent(source: ReactComponentClass<Props, unknown>, props: Props): Promise<[unknown, ReactOptions]>  {
+  async function renderComponent(source: ReactComponentClass<Props, unknown>, props: Props): Promise<[unknown, ReactOptions]>  {
+    const [state, setState] = useState(() => ({
+      ...source.prototype.state
+    }));
+
+    console.log({ state });
+
     const currentInstance = instance.get(source);
     if (!currentInstance) {
       const newInstance = new source(props);
+      Object.defineProperty(newInstance, "setState", {
+        value: setState
+      });
       instance.set(source, newInstance);
       return cycleComponent(source, props);
     }
 
-    if (!isReactErrorBoundaryInstance(currentInstance)) {
-      return undefined; // Nothing to do, not supported yet
-    }
+    Object.defineProperty(source, "state", {
+      value: state
+    });
 
     const childrenOptions: ReactOptions = {
       ...options
     };
 
-    if (isReactErrorBoundaryInstance(currentInstance)) {
-      childrenOptions[REACT_ERROR_BOUNDARY] = onErrorBoundary.bind(undefined, currentInstance);
+    if (isReactErrorBoundaryInstance(currentInstance) || source.getDerivedStateFromError) {
+      childrenOptions[REACT_ERROR_BOUNDARY] = useErrorBoundary(setState, currentInstance, source);
     }
 
-    return [currentInstance.render(), childrenOptions];
+    const result: [unknown, ReactOptions] = [currentInstance.render(), childrenOptions];
+
+    previousState = state;
+    return result;
   }
 
-  async function onErrorBoundary<S>(instance: ReactErrorBoundaryClass<Props, S>, error: unknown) {
-    const nextState = instance.getDerivedStateFromError?.(error);
-    if (typeof nextState !== "undefined") {
-      // TODO component state
-    }
-    instance.componentDidCatch?.(error, {
-      componentStack: isErrorStackLike(error) ? error.stack ?? "" : ""
-    });
-
-    function isErrorStackLike(error: unknown): error is { stack: unknown } {
-      return !!error;
-    }
+  function useErrorBoundary<S>(setState: Dispatch<SetStateAction<S>>, instance: ReactComponent<Props, S>, source: ReactComponentClass<Props, S>) {
+    return useCallback((error: unknown): boolean => {
+      let handled = false;
+      const nextState = source.getDerivedStateFromError?.(error);
+      if (typeof nextState !== "undefined") {
+        setState((previousState) => ({
+          ...previousState,
+          ...nextState
+        }));
+        handled = true;
+      }
+      // According type react types, componentDidCatch only receives actual error instances
+      if (error instanceof Error) {
+        instance.componentDidCatch?.(error, {
+          componentStack: error.stack ?? ""
+        });
+        handled = true;
+      }
+      return !handled;
+    }, [instance, source]);
   }
 
   async function commitHookEffectList(tag: number) {
@@ -283,22 +357,9 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     }
   }
 
-  async function renderWithHooks(source: (props: Props, children: VNode) => unknown, props: Props): Promise<unknown> {
+  async function renderFunction(source: (props: Props, children: VNode) => unknown, props: Props): Promise<unknown> {
     hookIndex = -1;
-
-    SharedInternals.ReactCurrentDispatcher.current = {
-      useRef,
-      useMemo,
-      useCallback,
-      useEffect,
-      useLayoutEffect: useEffect,
-      useState,
-      useReducer,
-      useContext,
-      useDebugValue: noop,
-      useImperativeHandle: noop,
-    };
-
+    SharedInternals.ReactCurrentDispatcher.current = dispatcher;
     const returnedValue = source(props, { reference: Fragment, children: node.children } );
     SharedInternals.ReactCurrentOwner.current = undefined;
     SharedInternals.ReactCurrentDispatcher.current = undefined;
@@ -358,7 +419,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     return next;
   }
 
-  function useCallback<T extends () => void>(nextCallback: T, deps?: unknown[]): T {
+  function useCallback<T extends (...args: unknown[]) => unknown>(nextCallback: T, deps?: unknown[]): T {
     const hook = useWorkInProgress<[T, unknown[]]>();
     if (hook.memoizedState && deps && areHookInputsEqual(deps, hook.memoizedState[1])) {
       return hook.memoizedState[0];
@@ -480,10 +541,12 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     updateQueue.add(() => {
       const currentState = hook.memoizedState;
       const nextState = hook.queue.lastRenderedReducer(currentState, action);
+      console.log({ currentState, nextState });
       if (Object.is(nextState, currentState)) {
         return;
       }
       hook.memoizedState = nextState;
+      currentStateChange = Symbol();
     });
   }
 
@@ -812,7 +875,6 @@ function isReactElement(value: unknown): value is ReactElement {
       typeof value.type === "string" ||
       isReactContextConsumerElement(value) ||
       isReactContextProviderElement(value) ||
-      isReactErrorBoundaryElement(value) ||
       value.type === ReactFragment
     )
   );
@@ -894,27 +956,14 @@ function isReactComponent<T, S extends object = Record<string, unknown>>(value: 
   );
 }
 
-function isReactErrorBoundaryInstance<P, S>(value: ReactComponent<P, S>): value is InstanceType<ReactErrorBoundaryClass<P, S>> {
+function isReactErrorBoundaryInstance<P, S>(value: ReactComponent<P, S>): value is InstanceType<ReactComponentClass<P, S>> {
   function isReactErrorBoundaryLike(value: unknown): value is Record<string, unknown> {
     return !!value;
   }
   return (
     isReactErrorBoundaryLike(value) &&
     (
-      typeof value.getDerivedStateFromError === "function" ||
       typeof value.componentDidCatch === "function"
     )
   );
-}
-
-function isReactErrorBoundaryElement<P, S>(value: unknown): value is ReactElement<PropsWithChildren<P>, ReactErrorBoundaryClass<P, S>> {
-  function isReactContextProviderElementLike(value: unknown): value is { type: unknown } {
-    return !!value;
-  }
-  return isReactContextProviderElementLike(value) && isReactContextProvider(value.type);
-}
-
-interface ReactErrorBoundaryClass<P, S> extends ReactComponentClass<P, S> {
-  getDerivedStateFromError?(error: unknown): S | undefined;
-  componentDidCatch?(error: unknown, errorInfo: unknown): void;
 }
