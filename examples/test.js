@@ -35,6 +35,10 @@ class ErrorBoundary extends ReactComponent {
   componentDidCatch(error, errorInfo) {
     // You can also log the error to an error reporting service
     console.log("Caught", error, errorInfo);
+
+    setTimeout(() => {
+      this.setState({ hasError: false });
+    }, 2000)
   }
 
   render() {
@@ -49,6 +53,7 @@ class ErrorBoundary extends ReactComponent {
 }
 
 function A() {
+
   const [state, onState] = useReducer((state) => state + 1, 1, undefined);
 
   const [isLoaded, setIsLoaded] = useState(false);
@@ -61,15 +66,13 @@ function A() {
   if (!isLoaded) throw promise;
 
   useEffect(() => {
-    console.log("interval");
     let count = 0;
     const interval = setInterval(() => {
-      console.log("set state");
-      count += 1;
-      if (count > 3) {
+      if ((count += 1) > 3) {
         clearInterval(interval);
+      } else {
+        onState();
       }
-      onState();
     }, 300);
     return () => {
       clearInterval(interval);
@@ -85,7 +88,6 @@ function A() {
 
     console.log("After click");
 
-    throw new Error("oops");
 
   }, [])
 

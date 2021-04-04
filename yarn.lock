@@ -607,10 +607,10 @@ loose-envify@^1.1.0:
   dependencies:
     js-tokens "^3.0.0 || ^4.0.0"
 
-microtask-collector@^1.0.4:
-  version "1.0.4"
-  resolved "https://registry.npmjs.org/microtask-collector/-/microtask-collector-1.0.4.tgz#c92751f5171d55477cae7b613435b735b326fdd3"
-  integrity sha512-j49//GFbQnRTZSrKgmgp5q1SAewmr9+ZQ4+Ta6jf7CS29Z8POqNrI99X3ztz1SZqFjr9kMzZQjy7+T1X33KgIA==
+microtask-collector@^1.0.5:
+  version "1.0.5"
+  resolved "https://registry.npmjs.org/microtask-collector/-/microtask-collector-1.0.5.tgz#7bc4dae99dfacc4b66459867f11db8939291c97e"
+  integrity sha512-lXyuOvxWDCdHw0lU8VA9XjywgaQauX9XlW9NvUwNTxGH7e7Ppoo6vS9h6uYMnWGfPCBzySv2EL4MLgyu2YLnKg==
 
 mime-db@1.46.0:
   version "1.46.0"

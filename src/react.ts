@@ -42,6 +42,7 @@ import * as NoNo from "react";
 import { isIterable, isPromise } from "iterable";
 import { Collector } from "microtask-collector";
 import { isElement } from "@opennetwork/vdom";
+import { Cancellable, SimpleCancellable } from "./cancellable";
 
 const dummyContext = createContext(undefined);
 const ReactProviderSymbol = dummyContext.Provider.$$typeof;
@@ -51,6 +52,7 @@ const REACT_TREE = Symbol("React Tree");
 const REACT_CONTEXT = Symbol("React Context");
 const REACT_ERROR_BOUNDARY = Symbol("React Error Boundary");
 const PROPS_BRAND = Symbol("Props");
+const CANCELLABLE = Symbol("Cancellable");
 
 export const DISPATCHER = Symbol("✨ Dispatcher ✨");
 
@@ -89,6 +91,7 @@ export interface ReactOptions extends Record<string, unknown> {
   [REACT_TREE]?: boolean;
   [REACT_CONTEXT]?: ReactContextMap;
   [REACT_ERROR_BOUNDARY]?(error: unknown): boolean;
+  [CANCELLABLE]?: Cancellable;
 }
 
 interface DeferredAction {
@@ -110,8 +113,10 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
   const instance = new Map<ReactComponentClass<Props, unknown>, InstanceType<ReactComponentClass<Props, unknown>>>();
 
   const updateQueue: DeferredActionCollector = new Collector<DeferredAction, ReadonlyArray<DeferredAction>>({
-    map: Object.freeze
+    map: Object.freeze,
+    eagerCollection: true
   });
+  const updateQueueIterator = updateQueue[Symbol.asyncIterator]();
 
   let componentUpdateQueue: FunctionComponentUpdateQueue | undefined = undefined;
 
@@ -137,10 +142,9 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
   let currentProps: Props = props,
     previousState: unknown = undefined,
     currentStateChange = Symbol(),
-    previousStateChange = Symbol();
+    previousStateChange = Symbol(),
+    caughtError: unknown = undefined;
   setCurrentProps(props);
-
-  const cycleHookIndexStart = hookIndex;
 
   return {
     reference: Fragment,
@@ -165,11 +169,14 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
   }
 
   async function *renderGenerator(source: SourceReferenceRepresentationFactory<Props>): AsyncIterable<ReadonlyArray<VNode>> {
-    const updateQueueIterator = updateQueue[Symbol.asyncIterator]();
     let updateQueueIterationResult: IteratorResult<ReadonlyArray<DeferredAction>> | undefined = undefined;
     const knownPromiseErrors = new WeakSet<Promise<unknown>>();
 
     cycle: do {
+      queue = Promise.resolve();
+      hookIndex = -1;
+      componentUpdateQueue = undefined;
+
       if (previousProps !== currentProps || previousStateChange !== currentStateChange) {
         try {
           const [latestValue, childrenOptions] = await render(source, currentProps);
@@ -190,26 +197,29 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
           }
         } catch (error) {
           if (await onError(error)) {
-            console.log("Breaking cycle 1", error);
             break;
           }
         }
       }
+      await commitHookEffectList(0);
+
       updateQueueIterationResult = await updateQueueIterator.next();
       for (const update of updateQueueIterationResult.value ?? []) {
         try {
           await update();
         } catch (error) {
           if (await onError(error)) {
-            console.log("Breaking cycle 2", error);
             break cycle;
           }
         }
       }
-
-    } while (!updateQueueIterationResult.done);
+    } while (!updateQueueIterationResult.done && options[CANCELLABLE]?.cancelled !== true && !caughtError);
 
     await destroyHookEffectList(0);
+
+    if (caughtError) {
+      await Promise.reject(caughtError);
+    }
 
     async function onError(error: unknown): Promise<boolean> {
       if (isPromise(error)) {
@@ -223,64 +233,74 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
         return false;
       }
       else if (options[REACT_ERROR_BOUNDARY]) {
-        return options[REACT_ERROR_BOUNDARY](error);
+        await options[REACT_ERROR_BOUNDARY](error);
       }
       else {
+        caughtError = error;
         await updateQueueIterator.return?.();
-        throw error;
       }
+      return true;
     }
   }
 
   async function render(source: SourceReferenceRepresentationFactory<Props>, props: Props): Promise<[unknown, ReactOptions]>  {
-    queue = Promise.resolve();
-    hookIndex = cycleHookIndexStart;
-    componentUpdateQueue = undefined;
-
     if (isReactComponent<Props, Record<string, unknown>>(source)) {
       return renderComponent(source, props);
     }
 
     const latestValue = await renderFunction(source, props);
 
-    if (hookIndex === cycleHookIndexStart) {
+    if (hookIndex === -1) {
       // We are rendering only, no hooks utilised
       return [latestValue, options];
     }
 
-    await commitHookEffectList(0);
-
-    previousProps = props;
     return [latestValue, options];
   }
 
-  async function renderComponent(source: ReactComponentClass<Props, unknown>, props: Props): Promise<[unknown, ReactOptions]>  {
-    const [state, setState] = useState(() => ({
-      ...source.prototype.state
-    }));
-
-    console.log({ state });
-
+  async function renderComponent(source: ReactComponentClass<Props, unknown>, props: Props, initialState: Record<string, unknown> = source.prototype.state): Promise<[unknown, ReactOptions]>  {
     const currentInstance = instance.get(source);
     if (!currentInstance) {
       const newInstance = new source(props);
-      Object.defineProperty(newInstance, "setState", {
-        value: setState
-      });
       instance.set(source, newInstance);
-      return cycleComponent(source, props);
+      let initialState = newInstance.state ?? {};
+      if (source.getDerivedStateFromProps) {
+        const nextState = source.getDerivedStateFromProps(props, initialState);
+        if (nextState && nextState !== initialState) {
+          initialState = {
+            ...initialState,
+            ...nextState
+          };
+        }
+      }
+      return renderComponent(source, props, initialState);
     }
 
-    Object.defineProperty(source, "state", {
-      value: state
-    });
+    const [state, setState] = useReducer((previousState: Record<string, unknown>, nextStateAction: SetStateAction<Record<string, unknown>>) => {
+      const nextState = typeof nextStateAction === "function" ? nextStateAction(previousState) : nextStateAction;
+      if (!nextState || nextState === previousState) {
+        return previousState;
+      }
+      return {
+        ...previousState,
+        ...nextState
+      };
+    }, initialState ?? {});
+
+    if (source.getDerivedStateFromProps && previousProps !== currentProps) {
+      setState((previousState) => source.getDerivedStateFromProps?.(currentProps, previousState));
+    }
+
+    currentInstance.state = state;
+    currentInstance.setState = setState;
 
     const childrenOptions: ReactOptions = {
       ...options
     };
 
+    const errorBoundary = useErrorBoundary(setState, currentInstance, source);
     if (isReactErrorBoundaryInstance(currentInstance) || source.getDerivedStateFromError) {
-      childrenOptions[REACT_ERROR_BOUNDARY] = useErrorBoundary(setState, currentInstance, source);
+      childrenOptions[REACT_ERROR_BOUNDARY] = errorBoundary;
     }
 
     const result: [unknown, ReactOptions] = [currentInstance.render(), childrenOptions];
@@ -289,15 +309,12 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     return result;
   }
 
-  function useErrorBoundary<S>(setState: Dispatch<SetStateAction<S>>, instance: ReactComponent<Props, S>, source: ReactComponentClass<Props, S>) {
+  function useErrorBoundary<S>(setState: Dispatch<SetStateAction<Partial<S>>>, instance: ReactComponent<Props, S>, source: ReactComponentClass<Props, S>) {
     return useCallback((error: unknown): boolean => {
       let handled = false;
       const nextState = source.getDerivedStateFromError?.(error);
       if (typeof nextState !== "undefined") {
-        setState((previousState) => ({
-          ...previousState,
-          ...nextState
-        }));
+        setState(nextState);
         handled = true;
       }
       // According type react types, componentDidCatch only receives actual error instances
@@ -308,7 +325,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
         handled = true;
       }
       return !handled;
-    }, [instance, source]);
+    }, [instance, source, setState]);
   }
 
   async function commitHookEffectList(tag: number) {
@@ -431,10 +448,10 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     return nextCallback;
   }
 
-  function useEffect(create: EffectCallback, deps?: unknown[]) {
+  function useEffect(create: EffectCallback, deps?: unknown[]): void {
     const hook = useWorkInProgress<WorkInProgressHookEffect>();
     if (hook.memoizedState && deps && areHookInputsEqual(deps, hook.memoizedState.deps)) {
-      return hook.memoizedState;
+      return;
     }
     hook.memoizedState = pushEffect(0, create, hook.memoizedState?.destroy, deps);
   }
@@ -541,7 +558,6 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     updateQueue.add(() => {
       const currentState = hook.memoizedState;
       const nextState = hook.queue.lastRenderedReducer(currentState, action);
-      console.log({ currentState, nextState });
       if (Object.is(nextState, currentState)) {
         return;
       }
@@ -598,7 +614,6 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     }
     return effect;
   }
-
 
   function createFunctionComponentUpdateQueue(): FunctionComponentUpdateQueue {
     return {
