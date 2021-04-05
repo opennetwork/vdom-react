@@ -36,7 +36,15 @@ import {
   createContext,
   Fragment as ReactFragment,
   Component as ReactComponent,
-  ComponentClass as ReactComponentClass, PropsWithChildren, ErrorInfo
+  ComponentClass as ReactComponentClass,
+  PropsWithChildren,
+  ErrorInfo,
+  ForwardRefExoticComponent as ReactForwardRefExoticComponent,
+  ForwardRefExoticComponent,
+  PropsWithoutRef,
+  RefAttributes,
+  forwardRef,
+  createElement as createReactElement, useMemo, FunctionComponent, useCallback, createRef
 } from "react";
 import * as NoNo from "react";
 import { isIterable, isPromise } from "iterable";
@@ -44,15 +52,18 @@ import { Collector } from "microtask-collector";
 import { isElement } from "@opennetwork/vdom";
 import { Cancellable, SimpleCancellable } from "./cancellable";
 
-const dummyContext = createContext(undefined);
-const ReactProviderSymbol = dummyContext.Provider.$$typeof;
-const ReactConsumerSymbol = dummyContext.Consumer.$$typeof;
+const throwAwayContext = createContext(undefined);
+const ReactProviderSymbol = throwAwayContext.Provider.$$typeof;
+const ReactConsumerSymbol = throwAwayContext.Consumer.$$typeof;
+const throwAwayForwardRef = forwardRef(() => createReactElement(ReactFragment));
+const ReactForwardRefSymbol = throwAwayForwardRef.$$typeof;
 
 const REACT_TREE = Symbol("React Tree");
 const REACT_CONTEXT = Symbol("React Context");
 const REACT_ERROR_BOUNDARY = Symbol("React Error Boundary");
 const PROPS_BRAND = Symbol("Props");
 const CANCELLABLE = Symbol("Cancellable");
+const REACT_NODE_CACHE = Symbol("REACT_NODE_CACHE");
 
 export const DISPATCHER = Symbol("✨ Dispatcher ✨");
 
@@ -74,11 +85,19 @@ export function dispatcher(props: unknown): ReactDispatcher {
   }
 }
 
+interface DeferredAction {
+  (): unknown;
+}
+type DeferredActionCollector = Collector<DeferredAction, ReadonlyArray<DeferredAction>>;
+
+export type ReactVNodeChildren = ReadonlyArray<NativeOptionsVNode | VNode & { native?: unknown }>;
+
 export interface ReactVNode extends VNode {
   options: {
     setProps(props: object): void;
+    updateQueue: DeferredActionCollector
   };
-  children: AsyncIterable<ReadonlyArray<NativeOptionsVNode | VNode & { native?: unknown }>>;
+  children: AsyncIterable<ReactVNodeChildren>;
 }
 
 export interface ReactContextDescriptor<T = unknown> {
@@ -88,18 +107,27 @@ export interface ReactContextDescriptor<T = unknown> {
 export type ReactContextMap = Map<ReactContext<unknown>, ReactContextDescriptor>;
 
 export interface ReactOptions extends Record<string, unknown> {
-  [REACT_TREE]?: boolean;
+  [REACT_TREE]: boolean;
+  [REACT_NODE_CACHE]: WeakMap<VNode, ReactVNode>;
   [REACT_CONTEXT]?: ReactContextMap;
   [REACT_ERROR_BOUNDARY]?(error: unknown): boolean;
   [CANCELLABLE]?: Cancellable;
 }
 
-interface DeferredAction {
-  (): unknown;
+function isReactOptions(options: Partial<ReactOptions>): options is ReactOptions {
+  return !!(options[REACT_TREE] && options[REACT_NODE_CACHE]);
 }
-type DeferredActionCollector = Collector<DeferredAction, ReadonlyArray<DeferredAction>>;
 
-export function React(options: ReactOptions, node: VNode): ReactVNode {
+
+export function React(options: Partial<ReactOptions>, node: VNode): ReactVNode {
+  if (!isReactOptions(options)) {
+    return React({ [REACT_TREE]: true, [REACT_NODE_CACHE]: new WeakMap(), ...options }, node);
+  }
+  const cachedNode = options[REACT_NODE_CACHE].get(node);
+  if (cachedNode) {
+    return cachedNode;
+  }
+
   type Props = { __isProps: typeof PROPS_BRAND } & Record<string, unknown>;
 
   assertSharedInternalsPresent(NoNo);
@@ -146,13 +174,36 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     caughtError: unknown = undefined;
   setCurrentProps(props);
 
-  return {
+  const childrenSource = renderGenerator(options, source);
+  let childrenSourceIterator: AsyncIterator<ReactVNodeChildren> | undefined = undefined;
+  let lastIteration: IteratorResult<ReactVNodeChildren> | undefined = undefined;
+
+  const resultNode: ReactVNode = {
     reference: Fragment,
     options: {
-      setProps
+      setProps,
+      updateQueue
     },
-    children: renderGenerator(source)
+    children: {
+      async *[Symbol.asyncIterator]() {
+        let yielded = false;
+        childrenSourceIterator = childrenSourceIterator ?? childrenSource[Symbol.asyncIterator]();
+        let result: IteratorResult<ReactVNodeChildren> | undefined = undefined;
+        do {
+          result = await childrenSourceIterator.next();
+          if (!yielded && result.done && lastIteration?.done === false) {
+            yield lastIteration.value;
+          } else if (!result.done) {
+            lastIteration = result;
+            yield result.value;
+          }
+          yielded = true;
+        } while (!result.done);
+      }
+    }
   };
+  options[REACT_NODE_CACHE].set(node, resultNode);
+  return resultNode;
 
   function setProps(props: object) {
     updateQueue.add(setCurrentProps.bind(undefined, props));
@@ -168,7 +219,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     currentProps = props;
   }
 
-  async function *renderGenerator(source: SourceReferenceRepresentationFactory<Props>): AsyncIterable<ReadonlyArray<VNode>> {
+  async function *renderGenerator(options: ReactOptions, source: SourceReferenceRepresentationFactory<Props>): AsyncIterable<ReadonlyArray<VNode>> {
     let updateQueueIterationResult: IteratorResult<ReadonlyArray<DeferredAction>> | undefined = undefined;
     const knownPromiseErrors = new WeakSet<Promise<unknown>>();
 
@@ -179,10 +230,17 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
 
       if (previousProps !== currentProps || previousStateChange !== currentStateChange) {
         try {
-          const [latestValue, childrenOptions] = await render(source, currentProps);
+          console.log({ render: source });
+          const renderResult = await render(options, source, currentProps);
+          console.log({ result: source, renderResult });
           previousProps = currentProps;
           previousStateChange = currentStateChange;
-          if (hookIndex === -1 && !options[REACT_TREE]) {
+          if (!renderResult) {
+            // This will jump to our update queue
+            continue;
+          }
+          const [latestValue, childrenOptions] = renderResult;
+          if (hookIndex === -1 && !childrenOptions[REACT_TREE]) {
             if (isVNode(latestValue) || isSourceReference(latestValue)) {
               yield Object.freeze([createVNode(latestValue)]);
             } else {
@@ -192,8 +250,10 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
           if (!latestValue) {
             yield Object.freeze([]);
           } else {
+            console.log("yield map", latestValue, source);
             assertReactElement(latestValue);
             yield Object.freeze([map(updateQueue, childrenOptions, latestValue)]);
+            console.log("post yield map", latestValue, source);
           }
         } catch (error) {
           if (await onError(error)) {
@@ -201,6 +261,12 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
           }
         }
       }
+
+      if (hookIndex === -1) {
+        // Nothing else to do
+        break;
+      }
+
       await commitHookEffectList(0);
 
       updateQueueIterationResult = await updateQueueIterator.next();
@@ -213,7 +279,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
           }
         }
       }
-    } while (!updateQueueIterationResult.done && options[CANCELLABLE]?.cancelled !== true && !caughtError);
+    } while (!updateQueueIterationResult?.done && options[CANCELLABLE]?.cancelled !== true && !caughtError);
 
     await destroyHookEffectList(0);
 
@@ -243,9 +309,9 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     }
   }
 
-  async function render(source: SourceReferenceRepresentationFactory<Props>, props: Props): Promise<[unknown, ReactOptions]>  {
+  async function render(options: ReactOptions, source: SourceReferenceRepresentationFactory<Props>, props: Props): Promise<[unknown, ReactOptions]>  {
     if (isReactComponent<Props, Record<string, unknown>>(source)) {
-      return renderComponent(source, props);
+      return renderComponent(options, source, props);
     }
 
     const latestValue = await renderFunction(source, props);
@@ -258,7 +324,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
     return [latestValue, options];
   }
 
-  async function renderComponent(source: ReactComponentClass<Props, unknown>, props: Props, initialState: Record<string, unknown> = source.prototype.state): Promise<[unknown, ReactOptions]>  {
+  async function renderComponent(options: ReactOptions, source: ReactComponentClass<Props, unknown>, props: Props, initialState: Record<string, unknown> = source.prototype.state): Promise<[unknown, ReactOptions] | undefined>  {
     const currentInstance = instance.get(source);
     if (!currentInstance) {
       const newInstance = new source(props);
@@ -273,7 +339,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
           };
         }
       }
-      return renderComponent(source, props, initialState);
+      return renderComponent(options, source, props, initialState);
     }
 
     const [state, setState] = useReducer((previousState: Record<string, unknown>, nextStateAction: SetStateAction<Record<string, unknown>>) => {
@@ -291,30 +357,86 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
       setState((previousState) => source.getDerivedStateFromProps?.(currentProps, previousState));
     }
 
-    currentInstance.state = state;
-    currentInstance.setState = setState;
+    Object.defineProperty(currentInstance, "forceUpdate", {
+      value: useForceUpdate()
+    });
+
+    Object.defineProperty(currentInstance, "setState", {
+      value: setState
+    });
 
     const childrenOptions: ReactOptions = {
       ...options
     };
 
-    const errorBoundary = useErrorBoundary(setState, currentInstance, source);
+    const errorBoundary = useErrorBoundary(currentInstance, source);
     if (isReactErrorBoundaryInstance(currentInstance) || source.getDerivedStateFromError) {
       childrenOptions[REACT_ERROR_BOUNDARY] = errorBoundary;
     }
+    const nextContext = {};
+
+    const snapshot = currentInstance.getSnapshotBeforeUpdate?.(previousProps, previousState);
+
+    const shouldUpdate = !currentInstance.shouldComponentUpdate || currentInstance.shouldComponentUpdate(currentProps, state, nextContext);
+
+    if (shouldUpdate === false) {
+      return undefined;
+    }
+
+    if (!snapshot && !source.getDerivedStateFromProps) {
+      currentInstance.componentWillMount?.();
+      currentInstance.UNSAFE_componentWillMount?.();
+
+      if (previousProps !== currentProps) {
+        currentInstance.componentWillReceiveProps?.(currentProps, nextContext);
+        currentInstance.UNSAFE_componentWillReceiveProps?.(currentProps, nextContext);
+      }
+
+      currentInstance.componentWillUpdate?.(currentProps, state, nextContext);
+      currentInstance.UNSAFE_componentWillUpdate?.(currentProps, state, nextContext);
+    }
+
+    Object.defineProperty(currentInstance, "state", {
+      value: state
+    });
+    Object.defineProperty(currentInstance, "props", {
+      value: currentProps
+    });
 
     const result: [unknown, ReactOptions] = [currentInstance.render(), childrenOptions];
+
+    currentInstance.componentDidMount?.();
+    currentInstance.componentDidUpdate?.(previousProps, previousState, snapshot);
+
+    useUnmount(currentInstance.componentWillUnmount);
 
     previousState = state;
     return result;
   }
 
-  function useErrorBoundary<S>(setState: Dispatch<SetStateAction<Partial<S>>>, instance: ReactComponent<Props, S>, source: ReactComponentClass<Props, S>) {
+  function useForceUpdate() {
+    return useCallback(() => {
+      updateQueue.add(() => {
+        currentStateChange = Symbol();
+      });
+    }, []);
+  }
+
+  function useUnmount(unmount?: () => void) {
+    return useEffect(() => {
+      if (!unmount) return;
+      return () => {
+        unmount();
+      };
+    }, [unmount]);
+  }
+
+  function useErrorBoundary<S>(instance: ReactComponent<Props, Partial<S>>, source: ReactComponentClass<Props, Partial<S>>) {
     return useCallback((error: unknown): boolean => {
       let handled = false;
       const nextState = source.getDerivedStateFromError?.(error);
       if (typeof nextState !== "undefined") {
-        setState(nextState);
+        instance.setState(nextState);
         handled = true;
       }
       // According type react types, componentDidCatch only receives actual error instances
@@ -325,7 +447,7 @@ export function React(options: ReactOptions, node: VNode): ReactVNode {
         handled = true;
       }
       return !handled;
-    }, [instance, source, setState]);
+    }, [instance, source, instance.setState]);
   }
 
   async function commitHookEffectList(tag: number) {
@@ -662,6 +784,14 @@ export function map(collector: DeferredActionCollector, options: Partial<ReactOp
         [REACT_CONTEXT]: nextReactContext
       })
     };
+  } else if (isReactForwardRefExoticElement(element)) {
+    const { type, props, ref } = element;
+    if (!isReactForwardRefExoticComponent(type)) {
+      throw new Error("Expected ref element");
+    }
+    const { render: source } = type;
+    const render = source.bind(undefined, props, ref || createRef());
+    return createVNode(() => React(options, { reference: Fragment, source: render, options: props || {} }));
   } else if (isReactElement(element)) {
     const { type, props } = element;
     if (type === ReactFragment) {
@@ -672,7 +802,7 @@ export function map(collector: DeferredActionCollector, options: Partial<ReactOp
         children: mapChildren(element.props.children, options)
       };
     } else if (typeof type === "function") {
-      return createVNode(() => React({ [REACT_TREE]: true, ...options }, { reference: Fragment, source: type, options: props || {} }));
+      return createVNode(() => React(options, { reference: Fragment, source: type, options: props || {} }));
     } else {
       return createSourceNode(element, type);
     }
@@ -682,11 +812,13 @@ export function map(collector: DeferredActionCollector, options: Partial<ReactOp
   async function *mapChildren(children: unknown, options: Partial<ReactOptions>): AsyncIterable<ReadonlyArray<VNode>> {
     return yield asVNode(children);
 
-    function asVNode(source: ReactElement | ReactNode | SourceReference): VNode[] {
+    function asVNode(source: ReactElement | ReactNode | SourceReference | SourceReferenceRepresentationFactory<object>): VNode[] {
       if (typeof source === "undefined") {
         return [];
       }
-      if (isSourceReference(source)) {
+      if (isSourceFunction(source)) {
+        return [createVNode(source)];
+      } else if (isSourceReference(source)) {
         // Bypass rest of the jazz
         return [createVNode(source)];
       }
@@ -697,6 +829,10 @@ export function map(collector: DeferredActionCollector, options: Partial<ReactOp
         return [map(collector, options, source)];
       }
       return [];
+    }
+
+    function isSourceFunction<O extends object = object>(source: unknown): source is SourceReferenceRepresentationFactory<O> {
+      return typeof source === "function";
     }
 
     // Typescript doesn't like reducing react node -> vnode ???
@@ -890,8 +1026,27 @@ function isReactElement(value: unknown): value is ReactElement {
       typeof value.type === "string" ||
       isReactContextConsumerElement(value) ||
       isReactContextProviderElement(value) ||
+      isReactForwardRefExoticElement(value) ||
       value.type === ReactFragment
     )
+  );
+}
+
+function isReactForwardRefExoticElement<T = unknown, P = object>(value: unknown): value is ReactElement<P, ReactForwardRefExoticComponent<PropsWithoutRef<P> & RefAttributes<T>> & { render(props: P, ref: MutableRefObject<unknown>): unknown }> & { ref: MutableRefObject<unknown> } {
+  function isReactForwardRefExoticElementLike(value: unknown): value is { type: unknown } {
+    return !!value;
+  }
+  return isReactForwardRefExoticElementLike(value) && isReactForwardRefExoticComponent(value.type);
+}
+
+function isReactForwardRefExoticComponent<T = unknown, P = unknown>(value: unknown): value is ReactForwardRefExoticComponent<PropsWithoutRef<P> & RefAttributes<T>> & { render(props: P, ref: MutableRefObject<unknown>): unknown } {
+  function isReactForwardRefExoticComponentLike(value: unknown): value is Partial<ReactForwardRefExoticComponent<PropsWithoutRef<P> & RefAttributes<T>>> & { render: unknown } {
+    return !!value;
+  }
+  return (
+    isReactForwardRefExoticComponentLike(value) &&
+    value.$$typeof === ReactForwardRefSymbol &&
+    typeof value.render === "function"
   );
 }
 

@@ -12,7 +12,8 @@ import {
   createContext,
   useContext,
   Fragment as ReactFragment,
-  Component as ReactComponent
+  Component as ReactComponent,
+  forwardRef
 } from "react";
 import {render, DOMVContext} from "@opennetwork/vdom";
 
@@ -52,6 +53,11 @@ class ErrorBoundary extends ReactComponent {
 
 }
 
+const Forwarded = forwardRef(function Forwarded(props, ref) {
+  console.log({ ref });
+  return createElement("button", { type: "button", ref }, "Forwarded");
+});
+
 function A() {
 
   const [state, onState] = useReducer((state) => state + 1, 1, undefined);
@@ -87,8 +93,6 @@ function A() {
     await new Promise(resolve => setTimeout(resolve, 1500));
 
     console.log("After click");
-
-
   }, [])
 
   const ref = useRef(null)
@@ -120,17 +124,23 @@ function WithProvider() {
 
 function Component() {
 
-  console.log(useRef())
+  const ref = useRef();
+
   // console.log(useMemo(() => index += 1, [index]));
   // console.log(useCallback(() => index, [])())
   // console.log(useEffect(() => {
   //   console.log("to to")
   // }, [index]))
 
+  useEffect(() => {
+    console.log({ ref2: ref });
+  });
+
   return createElement(
-    ErrorBoundary,
-    {},
-    createElement(A)
+    Forwarded,
+    {
+      ref: undefined
+    },
   );
 }
 
@@ -146,6 +156,7 @@ process.on("warning", console.log.bind("warning"))
 try {
 
   await render(ReactWrapper({}, { reference: Fragment, source: Component, options: {} }), context);
+  console.log("Finished initial rendering");
   await context.close();
   await logPromise;
   console.log("Finished rendering");
