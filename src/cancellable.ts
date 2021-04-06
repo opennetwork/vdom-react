@@ -1,30 +1,35 @@
-export interface Cancellable {
+export interface AbortSignal {
+  readonly aborted: boolean;
+}
+
+export interface CancellableSignal extends Partial<AbortSignal> {
   readonly cancelled?: unknown;
   readonly requested?: unknown;
   readonly reason?: unknown;
 }
 
-export class SimpleCancellable implements Cancellable {
+export class SimpleSignal implements AbortSignal {
 
-  private isCancelled: boolean = false;
+  private isAborted: boolean = false;
 
-  get requested() {
-    return this.isCancelled;
+  get aborted() {
+    return this.isAborted;
   }
 
-  cancel() {
-    this.isCancelled = true;
+  abort() {
+    this.isAborted = true;
   }
 
 }
 
-export function isCancelled(cancellable: Cancellable | undefined) {
+export function isAborted(cancellable?: CancellableSignal) {
   return !!(
     cancellable &&
     (
       cancellable.cancelled ||
       cancellable.requested ||
-      cancellable.reason
+      cancellable.reason ||
+      cancellable.aborted
     )
   );
 }

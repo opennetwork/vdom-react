@@ -1,5 +1,5 @@
 import dom from "./jsdom.js";
-import { React as ReactWrapper } from "../dist/index.js";
+import { render } from "../dist/index.js";
 import {Fragment} from "@opennetwork/vnode";
 import {
   useEffect,
@@ -15,7 +15,6 @@ import {
   Component as ReactComponent,
   forwardRef
 } from "react";
-import {render, DOMVContext} from "@opennetwork/vdom";
 
 const Context = createContext(0);
 const { Provider, Consumer } = Context;
@@ -54,7 +53,7 @@ class ErrorBoundary extends ReactComponent {
 }
 
 const Forwarded = forwardRef(function Forwarded(props, ref) {
-  console.log({ ref });
+  useRef(1);
   return createElement("button", { type: "button", ref }, "Forwarded");
 });
 
@@ -144,10 +143,6 @@ function Component() {
   );
 }
 
-const context = new DOMVContext({
-  root: dom.window.document.body
-});
-const logPromise = log();
 
 process.on("uncaughtException", console.log.bind("uncaughtException"))
 process.on("unhandledRejection", console.log.bind("unhandledRejection"))
@@ -155,31 +150,9 @@ process.on("warning", console.log.bind("warning"))
 
 try {
 
-  await render(ReactWrapper({}, { reference: Fragment, source: Component, options: {} }), context);
-  console.log("Finished initial rendering");
-  await context.close();
-  await logPromise;
+  await render(createElement(Component), dom.window.document.body);
   console.log("Finished rendering");
   console.log(window.document.body.outerHTML)
 } catch (e) {
   console.error(e);
-}
-
-var usedElement = undefined;
-
-async function log() {
-  for await (const event of context.events.hydrate) {
-    console.log(window.document.body.outerHTML)
-
-    const element = window.document.getElementById("clickable");
-
-    if (element && !usedElement) {
-      usedElement = element;
-
-      const event = window.document.createEvent("HTMLEvents");
-      event.initEvent("click", false, true);
-      element.dispatchEvent(event);
-    }
-
-  }
 }

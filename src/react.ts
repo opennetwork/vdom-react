@@ -37,20 +37,18 @@ import {
   Fragment as ReactFragment,
   Component as ReactComponent,
   ComponentClass as ReactComponentClass,
-  PropsWithChildren,
-  ErrorInfo,
   ForwardRefExoticComponent as ReactForwardRefExoticComponent,
-  ForwardRefExoticComponent,
   PropsWithoutRef,
   RefAttributes,
   forwardRef,
-  createElement as createReactElement, useMemo, FunctionComponent, useCallback, createRef
+  createElement as createReactElement, createRef
 } from "react";
 import * as NoNo from "react";
 import { isIterable, isPromise } from "iterable";
 import { Collector } from "microtask-collector";
 import { isElement } from "@opennetwork/vdom";
-import { Cancellable, SimpleCancellable } from "./cancellable";
+import { Controller, RenderMeta } from "./controller";
+import { Deferred, deferred } from "./deferred";
 
 const throwAwayContext = createContext(undefined);
 const ReactProviderSymbol = throwAwayContext.Provider.$$typeof;
@@ -58,12 +56,12 @@ const ReactConsumerSymbol = throwAwayContext.Consumer.$$typeof;
 const throwAwayForwardRef = forwardRef(() => createReactElement(ReactFragment));
 const ReactForwardRefSymbol = throwAwayForwardRef.$$typeof;
 
-const REACT_TREE = Symbol("React Tree");
-const REACT_CONTEXT = Symbol("React Context");
-const REACT_ERROR_BOUNDARY = Symbol("React Error Boundary");
-const PROPS_BRAND = Symbol("Props");
-const CANCELLABLE = Symbol("Cancellable");
-const REACT_NODE_CACHE = Symbol("REACT_NODE_CACHE");
+const IS_IN_REACT_TREE = Symbol("This component is part of a react tree");
+const CONTEXT = Symbol("Context");
+const ERROR_BOUNDARY = Symbol("Error Boundary");
+const CONTROLLER = Symbol("Controller");
+const ITERATE_UPDATE_QUEUE = Symbol("Iterate update queue");
+const PARENT = Symbol("Parent ReactVNode");
 
 export const DISPATCHER = Symbol("✨ Dispatcher ✨");
 
@@ -91,13 +89,37 @@ interface DeferredAction {
 type DeferredActionCollector = Collector<DeferredAction, ReadonlyArray<DeferredAction>>;
 
 export type ReactVNodeChildren = ReadonlyArray<NativeOptionsVNode | VNode & { native?: unknown }>;
+export interface ContinueFn {
+  (): boolean;
+}
+export type ContinueFlag = ContinueFn | undefined;
+
+const VNODE = Symbol("React VNode");
 
 export interface ReactVNode extends VNode {
+  [VNODE]: true;
   options: {
     setProps(props: object): void;
-    updateQueue: DeferredActionCollector
+    updateQueue: DeferredActionCollector,
+    readonly stateChanged: boolean;
+    readonly parent: ReactVNode
+    destroy(): Promise<void>;
+    setContinueFlag(continueFlag: ContinueFlag): void
   };
   children: AsyncIterable<ReactVNodeChildren>;
+}
+
+export function isReactVNode(node: VNode): node is ReactVNode {
+  function isReactVNodeLike(node: unknown): node is { [VNODE]: unknown } {
+    return !!node;
+  }
+  return isReactVNodeLike(node) && node[VNODE] === true;
+}
+
+export function assertReactVNode(node: VNode): asserts node is ReactVNode {
+  if (!isReactVNode(node)) {
+    throw new Error("Expected ReactVNode");
+  }
 }
 
 export interface ReactContextDescriptor<T = unknown> {
@@ -107,28 +129,48 @@ export interface ReactContextDescriptor<T = unknown> {
 export type ReactContextMap = Map<ReactContext<unknown>, ReactContextDescriptor>;
 
 export interface ReactOptions extends Record<string, unknown> {
-  [REACT_TREE]: boolean;
-  [REACT_NODE_CACHE]: WeakMap<VNode, ReactVNode>;
-  [REACT_CONTEXT]?: ReactContextMap;
-  [REACT_ERROR_BOUNDARY]?(error: unknown): boolean;
-  [CANCELLABLE]?: Cancellable;
+  [IS_IN_REACT_TREE]: boolean;
+  [CONTROLLER]: Controller;
+  [CONTEXT]: ReactContextMap;
+  [ERROR_BOUNDARY](error: unknown): boolean;
+  [PARENT]?: ReactVNode;
 }
 
 function isReactOptions(options: Partial<ReactOptions>): options is ReactOptions {
-  return !!(options[REACT_TREE] && options[REACT_NODE_CACHE]);
+  return !!(options[IS_IN_REACT_TREE] && options[CONTROLLER] && options[CONTEXT] && options[ERROR_BOUNDARY]);
 }
 
-
 export function React(options: Partial<ReactOptions>, node: VNode): ReactVNode {
+  const PROPS_BRAND = Symbol("This object is branded as this components props");
+
   if (!isReactOptions(options)) {
-    return React({ [REACT_TREE]: true, [REACT_NODE_CACHE]: new WeakMap(), ...options }, node);
-  }
-  const cachedNode = options[REACT_NODE_CACHE].get(node);
-  if (cachedNode) {
-    return cachedNode;
+    return React(
+      {
+        [IS_IN_REACT_TREE]: true,
+        [CONTROLLER]: new Controller(),
+        [CONTEXT]: new Map(),
+        [ERROR_BOUNDARY]: () => undefined,
+        ...options
+      },
+      node
+    );
   }
 
-  type Props = { __isProps: typeof PROPS_BRAND } & Record<string, unknown>;
+  if (isReactElement(node.source) && typeof node.source.type === "function") {
+    return React(
+      options,
+      {
+        reference: node.source.key || Fragment,
+        source: node.source.type,
+        options: node.source.props
+      }
+    );
+  }
+
+  type Props = {
+    __isProps: typeof PROPS_BRAND,
+    [ITERATE_UPDATE_QUEUE]?: boolean
+  } & Record<string, unknown>;
 
   assertSharedInternalsPresent(NoNo);
   const { __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED: SharedInternals } = NoNo;
@@ -137,7 +179,7 @@ export function React(options: Partial<ReactOptions>, node: VNode): ReactVNode {
   let hookIndex = -1;
   let queue: Promise<void> = Promise.resolve();
   let previousProps: Props | undefined = undefined;
-  // let previousElement: Element | undefined = undefined;
+
   const instance = new Map<ReactComponentClass<Props, unknown>, InstanceType<ReactComponentClass<Props, unknown>>>();
 
   const updateQueue: DeferredActionCollector = new Collector<DeferredAction, ReadonlyArray<DeferredAction>>({
@@ -171,45 +213,70 @@ export function React(options: Partial<ReactOptions>, node: VNode): ReactVNode {
     previousState: unknown = undefined,
     currentStateChange = Symbol(),
     previousStateChange = Symbol(),
-    caughtError: unknown = undefined;
+    caughtError: unknown = undefined,
+    isDestroyable = false,
+    destroyed = false,
+    rendering: Promise<void> | undefined,
+    continueFlag: () => boolean | undefined = () => false;
+
   setCurrentProps(props);
 
-  const childrenSource = renderGenerator(options, source);
-  let childrenSourceIterator: AsyncIterator<ReactVNodeChildren> | undefined = undefined;
-  let lastIteration: IteratorResult<ReactVNodeChildren> | undefined = undefined;
+  const controller = options[CONTROLLER];
 
-  const resultNode: ReactVNode = {
+  const populatedNode: ReactVNode = {
+    [VNODE]: true,
     reference: Fragment,
     options: {
       setProps,
-      updateQueue
+      setContinueFlag,
+      updateQueue,
+      get stateChanged() {
+        return currentStateChange !== previousStateChange || updateQueue.size > 0;
+      },
+      get parent() {
+        return options[PARENT];
+      },
+      destroy
     },
     children: {
-      async *[Symbol.asyncIterator]() {
-        let yielded = false;
-        childrenSourceIterator = childrenSourceIterator ?? childrenSource[Symbol.asyncIterator]();
-        let result: IteratorResult<ReactVNodeChildren> | undefined = undefined;
-        do {
-          result = await childrenSourceIterator.next();
-          if (!yielded && result.done && lastIteration?.done === false) {
-            yield lastIteration.value;
-          } else if (!result.done) {
-            lastIteration = result;
-            yield result.value;
-          }
-          yielded = true;
-        } while (!result.done);
-      }
+      [Symbol.asyncIterator]: renderGenerator.bind(undefined, options, source)
     }
   };
-  options[REACT_NODE_CACHE].set(node, resultNode);
-  return resultNode;
+  controller.hello?.(populatedNode);
+  return populatedNode;
+
+  async function destroy() {
+    isDestroyable = true;
+    if (destroyed) return;
+    // Push an update where it will see that the component is destroyed
+    updateQueue.add(() => {});
+    while (!destroyed && rendering) await rendering;
+    if (!destroyed) {
+      await actuallyDestroy();
+    }
+  }
+
+  async function actuallyDestroy() {
+    isDestroyable = true;
+    destroyed = true;
+    await controller.beforeDestroyed?.(populatedNode);
+    await destroyHookEffectList(0);
+    await controller.afterDestroyed?.(populatedNode);
+    updateQueue.close();
+  }
+
+  function setContinueFlag(givenContinueFlag: typeof continueFlag) {
+    continueFlag = givenContinueFlag;
+  }
 
   function setProps(props: object) {
     updateQueue.add(setCurrentProps.bind(undefined, props));
   }
 
   function setCurrentProps(props: object) {
+    if (props === currentProps) {
+      return;
+    }
     assertProps(props);
     if (Object.isExtensible(props)) {
       Object.defineProperty(props, DISPATCHER, {
@@ -217,30 +284,55 @@ export function React(options: Partial<ReactOptions>, node: VNode): ReactVNode {
       });
     }
     currentProps = props;
+    currentStateChange = Symbol();
   }
 
   async function *renderGenerator(options: ReactOptions, source: SourceReferenceRepresentationFactory<Props>): AsyncIterable<ReadonlyArray<VNode>> {
-    let updateQueueIterationResult: IteratorResult<ReadonlyArray<DeferredAction>> | undefined = undefined;
     const knownPromiseErrors = new WeakSet<Promise<unknown>>();
+    let renderedStateChange = previousStateChange,
+      renderedProps = previousProps,
+      renderMeta: RenderMeta,
+      renderDeferred: Deferred;
 
-    cycle: do {
+    do {
+      console.log("render", source, continueFlag);
       queue = Promise.resolve();
       hookIndex = -1;
       componentUpdateQueue = undefined;
 
-      if (previousProps !== currentProps || previousStateChange !== currentStateChange) {
+      const renderingProps = currentProps;
+      const renderingStateChange = currentStateChange;
+
+      renderMeta = {
+        parent: options[PARENT],
+        onError,
+        currentChange: currentStateChange,
+        currentProps,
+        previousChange: renderedStateChange,
+        previousProps: renderedProps
+      };
+
+      if (renderedStateChange !== currentStateChange) {
         try {
-          console.log({ render: source });
-          const renderResult = await render(options, source, currentProps);
-          console.log({ result: source, renderResult });
-          previousProps = currentProps;
-          previousStateChange = currentStateChange;
+          if (!await controller.beforeRender?.(populatedNode, renderMeta)) break;
+          let renderResult;
+          renderDeferred = deferred();
+          rendering = renderDeferred.promise;
+          try {
+            renderResult = await render(options, source, renderingProps);
+          } finally {
+            renderDeferred.resolve();
+            if (renderDeferred.promise === rendering) {
+              rendering = undefined;
+            }
+          }
           if (!renderResult) {
+            renderedStateChange = previousStateChange = renderingStateChange;
             // This will jump to our update queue
             continue;
           }
           const [latestValue, childrenOptions] = renderResult;
-          if (hookIndex === -1 && !childrenOptions[REACT_TREE]) {
+          if (hookIndex === -1 && !childrenOptions[IS_IN_REACT_TREE]) {
             if (isVNode(latestValue) || isSourceReference(latestValue)) {
               yield Object.freeze([createVNode(latestValue)]);
             } else {
@@ -250,41 +342,60 @@ export function React(options: Partial<ReactOptions>, node: VNode): ReactVNode {
           if (!latestValue) {
             yield Object.freeze([]);
           } else {
-            console.log("yield map", latestValue, source);
             assertReactElement(latestValue);
-            yield Object.freeze([map(updateQueue, childrenOptions, latestValue)]);
-            console.log("post yield map", latestValue, source);
+            yield Object.freeze([map(updateQueue, { ...childrenOptions, [PARENT]: populatedNode }, latestValue)]);
           }
+          // If we use the symbol that was present as render started, it allows for things to happen
+          // _while_ we render outside of this cycle
+          renderedStateChange = previousStateChange = renderingStateChange;
+          renderedProps = previousProps = renderingProps;
         } catch (error) {
           if (await onError(error)) {
             break;
           }
         }
       }
-
-      if (hookIndex === -1) {
-        // Nothing else to do
-        break;
-      }
-
       await commitHookEffectList(0);
-
-      updateQueueIterationResult = await updateQueueIterator.next();
-      for (const update of updateQueueIterationResult.value ?? []) {
-        try {
-          await update();
-        } catch (error) {
-          if (await onError(error)) {
-            break cycle;
-          }
+      if (hookIndex > -1 && (continueFlag?.() ?? true)) {
+        if (!(await waitForUpdates())) {
+          break;
         }
       }
-    } while (!updateQueueIterationResult?.done && options[CANCELLABLE]?.cancelled !== true && !caughtError);
-
-    await destroyHookEffectList(0);
+    } while (!isDestroyable && (continueFlag?.() ?? true) && (await controller.afterRender?.(populatedNode, renderMeta) ?? true) && hookIndex > -1 && options[CONTROLLER]?.aborted !== true && !caughtError);
 
     if (caughtError) {
+      await actuallyDestroy();
       await Promise.reject(caughtError);
+    }
+
+    async function waitForUpdates(): Promise<boolean> {
+      const update = async () => {
+        const updateQueueIterationResult = await updateQueueIterator.next();
+        for (const update of updateQueueIterationResult.value ?? []) {
+          try {
+            await update();
+          } catch (error) {
+            if (await renderMeta.onError(error)) {
+              return false;
+            }
+          }
+        }
+      };
+      const { parent } = renderMeta;
+      if (node === parent || !parent) {
+        return await update();
+      } else {
+        return await new Promise<boolean>(resolve => parent.options.updateQueue.add(async () => {
+          try {
+            await update();
+          } catch (error) {
+            if (await renderMeta.onError(error)) {
+              return resolve(false);
+            }
+          }
+          resolve(true);
+        }));
+      }
     }
 
     async function onError(error: unknown): Promise<boolean> {
@@ -297,11 +408,8 @@ export function React(options: Partial<ReactOptions>, node: VNode): ReactVNode {
           knownPromiseErrors.add(error);
         }
         return false;
-      }
-      else if (options[REACT_ERROR_BOUNDARY]) {
-        await options[REACT_ERROR_BOUNDARY](error);
-      }
-      else {
+      } else if (await options[ERROR_BOUNDARY](error)) {
+        // If the error boundary returned true, the error should be thrown later on
         caughtError = error;
         await updateQueueIterator.return?.();
       }
@@ -371,7 +479,7 @@ export function React(options: Partial<ReactOptions>, node: VNode): ReactVNode {
 
     const errorBoundary = useErrorBoundary(currentInstance, source);
     if (isReactErrorBoundaryInstance(currentInstance) || source.getDerivedStateFromError) {
-      childrenOptions[REACT_ERROR_BOUNDARY] = errorBoundary;
+      childrenOptions[ERROR_BOUNDARY] = errorBoundary;
     }
     const nextContext = {};
 
@@ -514,7 +622,7 @@ export function React(options: Partial<ReactOptions>, node: VNode): ReactVNode {
 
     function readContext(context: unknown): T {
       assertReactContext(context);
-      const found = options[REACT_CONTEXT]?.get(context);
+      const found = options[CONTEXT]?.get(context);
       if (!isReactContextDescriptor(found)) {
         return undefined;
       }
@@ -762,13 +870,13 @@ export function React(options: Partial<ReactOptions>, node: VNode): ReactVNode {
 
 export function map(collector: DeferredActionCollector, options: Partial<ReactOptions>, element: unknown): VNode {
   if (isReactContextConsumerElement(element)) {
-    const foundContext = options[REACT_CONTEXT]?.get(element.type._context);
+    const foundContext = options[CONTEXT]?.get(element.type._context);
     const result = element.props.children(foundContext?.currentValue);
     if (result) {
       return map(collector, options, result);
     }
   } else if (isReactContextProviderElement(element)) {
-    const nextReactContext = new Map(options[REACT_CONTEXT]);
+    const nextReactContext = new Map(options[CONTEXT]);
     nextReactContext.set(element.type._context, {
       currentValue: element.props.value
     });
@@ -781,7 +889,7 @@ export function map(collector: DeferredActionCollector, options: Partial<ReactOp
       source: element,
       children: mapChildren(element.props.children, {
         ...options,
-        [REACT_CONTEXT]: nextReactContext
+        [CONTEXT]: nextReactContext
       })
     };
   } else if (isReactForwardRefExoticElement(element)) {

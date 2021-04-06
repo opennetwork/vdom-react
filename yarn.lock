@@ -23,10 +23,10 @@
   resolved "https://registry.npmjs.org/@opennetwork/progressive-merge/-/progressive-merge-5.0.2.tgz#9e8c7e6b082d32fdc507eaeaa2d1e44cbf659655"
   integrity sha512-pSeGNAvWkpdZkD2pf5xXfYidT5O0yvUPVRxax2ONeA+N4iNRTnv9CSH+f8DA3SgQGNcc6wKhmdTffdw2xuSQ8w==
 
-"@opennetwork/vdom@^10.1.0":
-  version "10.1.0"
-  resolved "https://registry.npmjs.org/@opennetwork/vdom/-/vdom-10.1.0.tgz#4ed3bdd39809fda9b1de8de6fe5b0c4cb39b4c5a"
-  integrity sha512-sY2H7QQq+PE6c/Jf3TEZTjaKyPq2j5STXDhR1qC6fkkyQs8N6VTFPSgqk6m6DXDS5KpdOsgJnL4FbAH0qyFFlQ==
+"@opennetwork/vdom@^10.1.1":
+  version "10.1.1"
+  resolved "https://registry.npmjs.org/@opennetwork/vdom/-/vdom-10.1.1.tgz#33f2232a8c9c7d247efba182667c0c4367f5473c"
+  integrity sha512-G3onAFcZc3k9TftqrXwxpeEnkLRo0XzLKlN3KgOjQznwc6ZsuuVLaVGvmBTyUtyL1CMEyE1eek4JGEWRrSxCPg==
 
 "@opennetwork/vnode-hooks@^6.0.0":
   version "6.0.0"
