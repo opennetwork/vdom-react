@@ -1,22 +1,17 @@
 import {
-  createVNode,
-  Fragment, FragmentVNode, isSourceReference, isVNode, SourceReference,
-  SourceReferenceRepresentationFactory,
+  createVNode as createBasicVNode,
+  Fragment,
+  FragmentVNode,
+  isSourceReference,
+  isVNode,
   VNode
 } from "@opennetwork/vnode";
-import { NativeAttributes, NativeOptions, NativeOptionsVNode, setAttributes } from "@opennetwork/vdom";
+import { NativeOptionsVNode } from "@opennetwork/vdom";
 import {
-  MutableRefObject,
-  ReactElement,
-  ReactNode,
   Context as ReactContext,
-  Fragment as ReactFragment,
   ComponentClass as ReactComponentClass,
-  createRef,
 } from "react";
-import * as NoNo from "react";
-import { isIterable, isPromise } from "iterable";
-import { isElement } from "@opennetwork/vdom";
+import { isPromise } from "iterable";
 import { Controller, RenderMeta } from "./controller";
 import { Deferred, deferred } from "./deferred";
 import { isAbortLifecycleError } from "./lifecycle";
@@ -24,15 +19,15 @@ import {
   assertFragment,
   assertFunction,
   assertProps,
-  assertReactElement, assertSharedInternalsPresent,
-  isReactComponent, isReactContextConsumerElement, isReactContextProviderElement, isReactElement,
-  isReactForwardRefExoticComponent, isReactForwardRefExoticElement
+  assertReactElement,
+  isReactComponent,
+  isReactElement,
 } from "./type-guards";
 import { createReactDispatcher } from "./dispatcher";
 import { DeferredAction, DeferredActionCollector } from "./queue";
 import { renderComponent } from "./component";
-import { Native } from "./native-node";
 import { renderFunction } from "./function";
+import { transform } from "./transform";
 
 const IS_IN_REACT_TREE = Symbol("This component is part of a react tree");
 const CONTEXT = Symbol("Context");
@@ -41,6 +36,8 @@ const CONTROLLER = Symbol("Controller");
 const PARENT = Symbol("Parent ReactVNode");
 
 export type ErrorBoundarySymbol = typeof ERROR_BOUNDARY;
+export type ContextSymbol = typeof CONTEXT;
+
 export interface ContinueFn {
   (): boolean;
 }
@@ -95,11 +92,11 @@ function isReactOptions(options: Partial<ReactOptions>): options is ReactOptions
   return !!(options[IS_IN_REACT_TREE] && options[CONTROLLER] && options[CONTEXT] && options[ERROR_BOUNDARY]);
 }
 
-export function React(options: Partial<ReactOptions>, node: VNode): ReactVNode {
+export function createVNode(options: Partial<ReactOptions>, node: VNode): ReactVNode {
   const PROPS_BRAND = Symbol("This object is branded as this components props");
 
   if (!isReactOptions(options)) {
-    return React(
+    return createVNode(
       {
         [IS_IN_REACT_TREE]: true,
         [CONTROLLER]: new Controller(),
@@ -112,7 +109,7 @@ export function React(options: Partial<ReactOptions>, node: VNode): ReactVNode {
   }
 
   if (isReactElement(node.source) && typeof node.source.type === "function") {
-    return React(
+    return createVNode(
       options,
       {
         reference: node.source.key || Fragment,
@@ -263,7 +260,7 @@ export function React(options: Partial<ReactOptions>, node: VNode): ReactVNode {
           const [latestValue, childrenOptions] = renderResult;
           if (!dispatcher.hooked && !childrenOptions[IS_IN_REACT_TREE]) {
             if (isVNode(latestValue) || isSourceReference(latestValue)) {
-              yield Object.freeze([createVNode(latestValue)]);
+              yield Object.freeze([createBasicVNode(latestValue)]);
             } else {
               yield Object.freeze([]);
             }
@@ -272,7 +269,20 @@ export function React(options: Partial<ReactOptions>, node: VNode): ReactVNode {
             yield Object.freeze([]);
           } else {
             assertReactElement(latestValue);
-            yield Object.freeze([map(dispatcher.updateQueue, { ...childrenOptions, [PARENT]: populatedNode }, latestValue)]);
+            yield Object.freeze(
+              [
+                transform({
+                  updateQueue: dispatcher.updateQueue,
+                  createVNode,
+                  contextSymbol: CONTEXT,
+                  options: {
+                    ...childrenOptions,
+                    [PARENT]: populatedNode
+                  },
+                  element: latestValue
+                })
+              ]
+            );
           }
           // If we use the symbol that was present as render started, it allows for things to happen
           // _while_ we render outside of this cycle
@@ -381,90 +391,6 @@ export function React(options: Partial<ReactOptions>, node: VNode): ReactVNode {
 
 }
 
-export function map(collector: DeferredActionCollector, options: Partial<ReactOptions>, element: unknown): ResolvedReactVNode {
-  if (isReactContextConsumerElement(element)) {
-    const foundContext = options[CONTEXT]?.get(element.type._context);
-    const result = element.props.children(foundContext?.currentValue);
-    if (result) {
-      return map(collector, options, result);
-    }
-  } else if (isReactContextProviderElement(element)) {
-    const nextReactContext = new Map(options[CONTEXT]);
-    nextReactContext.set(element.type._context, {
-      currentValue: element.props.value
-    });
-    return {
-      reference: Fragment,
-      options: {
-        context: element.type._context,
-        value: element.props.value
-      },
-      source: element,
-      children: flattenChildren(element.props.children, {
-        ...options,
-        [CONTEXT]: nextReactContext
-      })
-    };
-  } else if (isReactForwardRefExoticElement(element)) {
-    const { type, props, ref } = element;
-    if (!isReactForwardRefExoticComponent(type)) {
-      throw new Error("Expected ref element");
-    }
-    const { render: source } = type;
-    const render = source.bind(undefined, props, ref || createRef());
-    return React(options, { reference: Fragment, source: render, options: props || {} });
-  } else if (isReactElement(element)) {
-    const { type, props, ref, key }: ReactElement & { ref?: unknown } = element;
-    if (type === ReactFragment) {
-      return {
-        reference: Fragment,
-        options: {},
-        source: element,
-        children: flattenChildren(element.props.children, options)
-      };
-    } else if (typeof type === "function") {
-      return React(options, { reference: Fragment, source: type, options: props || {} });
-    } else {
-      return Native({
-        type,
-        props,
-        ref: ref,
-        children: flattenChildren(props.children, options),
-        collector,
-        key: key,
-      });
-    }
-  }
-  return { reference: Fragment, source: element };
-
-  async function *flattenChildren(children: unknown, options: Partial<ReactOptions>): AsyncIterable<ReadonlyArray<ResolvedReactVNode>> {
-    return yield flatten(children);
-
-    function flatten(source: unknown): ResolvedReactVNode[] {
-      if (isSourceReference(source)) {
-        // Bypass the native layer and make it a text node straight away
-        const native: NativeOptionsVNode = {
-          reference: Symbol(),
-          options: {
-            type: "Text"
-          },
-          source: String(source)
-        };
-        return [native];
-      } else if (Array.isArray(source)) {
-        return source.reduce<(FragmentVNode | ReactVNode | NativeOptionsVNode)[]>(
-          (nodes, value) => nodes.concat(...flatten(value)),
-          []
-        );
-      } else if (isReactElement(source)) {
-        return [map(collector, options, source)];
-      }
-      return [];
-    }
-
-  }
-
-}
 
 
 

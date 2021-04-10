@@ -1,7 +1,7 @@
 import { ReactElement } from "react";
 import { DOMVContext, Native, RenderOptions as DOMRenderOptions } from "@opennetwork/vdom";
-import { assertReactVNode, isReactVNode, React, ReactVNode } from "./react";
-import { createVNode, Fragment, hydrate, hydrateChildren, NativeVNode, Tree, VNode } from "@opennetwork/vnode";
+import { isReactVNode, createVNode } from "./node";
+import { createVNode as createBasicVNode, Fragment, hydrate, Tree, VNode } from "@opennetwork/vnode";
 import { Collector } from "microtask-collector";
 import { hydrateChildrenGroup } from "@opennetwork/vnode";
 
@@ -53,9 +53,9 @@ export function render(node: ReactElement, root: Element): unknown {
 
   const promises = new Set<Promise<unknown>>();
 
-  const rootVNode = React({}, { reference: Fragment, source: node, options: {} });
+  const rootVNode = createVNode({}, { reference: Fragment, source: node, options: {} });
   rootVNode.options.setContinueFlag(() => true);
-  const rootNativeNode = Native({}, createVNode(Fragment, {}, rootVNode));
+  const rootNativeNode = Native({}, createBasicVNode(Fragment, {}, rootVNode));
   return Promise.all([
     hydrate(context, rootNativeNode).then(close, close),
     wait()

@@ -1,8 +1,9 @@
 import { MutableRefObject, ReactElement } from "react";
-import { isElement, NativeAttributes, NativeOptionsVNode, setAttributes } from "@opennetwork/vdom";
+import { getDocumentNode, isElement, NativeAttributes, NativeOptionsVNode, setAttributes } from "@opennetwork/vdom";
 import { DeferredActionCollector } from "./queue";
 import { eventProxy, eventProxyCapture, ProxiedListeners } from "./scoped-events";
 import { VNode } from "@opennetwork/vnode";
+import { DOMNativeVNodeInstance } from "@opennetwork/vdom/src/options";
 
 export interface NativeElement extends ReactElement {
   ref?: unknown;
@@ -45,6 +46,8 @@ async function onBeforeRender(context: NativeElement, node: NativeOptionsVNode, 
     } else if (key === "class" || key === "className") {
       if (typeof value === "string") {
         documentNode.className = value;
+      } else if (typeof DOMTokenList !== "undefined" && value instanceof DOMTokenList) {
+        documentNode.className = value.value;
       } else {
         documentNode.className = "";
       }
