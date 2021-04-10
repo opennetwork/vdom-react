@@ -4,11 +4,12 @@ import {
   isReactContextProviderElement, isReactElement, isReactForwardRefExoticComponent,
   isReactForwardRefExoticElement
 } from "./type-guards";
-import { Fragment, FragmentVNode, isSourceReference } from "@opennetwork/vnode";
+import { Fragment, isSourceReference } from "@opennetwork/vnode";
 import { createRef, Fragment as ReactFragment, ReactElement } from "react";
+import type { DOMNativeVNode, NativeOptionsVNode } from "@opennetwork/vdom";
+import type { ContextSymbol, createVNode, ReactOptions, ResolvedReactVNode } from "./node";
+import { Native as DOMNative } from "@opennetwork/vdom";
 import { Native } from "./native-node";
-import { NativeOptionsVNode } from "@opennetwork/vdom";
-import type { ContextSymbol, createVNode, ReactOptions, ReactVNode, ResolvedReactVNode } from "./react";
 
 export interface TransformContext {
   options: Partial<ReactOptions>;
@@ -18,7 +19,12 @@ export interface TransformContext {
   createVNode: typeof createVNode;
 }
 
-export function transform(context: TransformContext): ResolvedReactVNode {
+export function transform(context: TransformContext): DOMNativeVNode {
+  const node = initialTransform(context);
+  return DOMNative(node.options, node);
+}
+
+export function initialTransform(context: TransformContext): ResolvedReactVNode {
   const {
     element,
     updateQueue,
@@ -31,7 +37,7 @@ export function transform(context: TransformContext): ResolvedReactVNode {
     const foundContext = contextMap?.get(element.type._context);
     const result = element.props.children(foundContext?.currentValue);
     if (result) {
-      return transform({
+      return initialTransform({
         ...context,
         element: result
       });
@@ -92,6 +98,7 @@ export function transform(context: TransformContext): ResolvedReactVNode {
     return yield flatten(children);
 
     function flatten(source: unknown): ResolvedReactVNode[] {
+      console.log({ source });
       if (isSourceReference(source)) {
         // Bypass the native layer and make it a text node straight away
         const native: NativeOptionsVNode = {
@@ -101,9 +108,12 @@ export function transform(context: TransformContext): ResolvedReactVNode {
           },
           source: String(source)
         };
-        return [native];
+        console.log({ native, e: DOMNative(native.options, native) });
+        return [
+          DOMNative(native.options, native)
+        ];
       } else if (Array.isArray(source)) {
-        return source.reduce<(FragmentVNode | ReactVNode | NativeOptionsVNode)[]>(
+        return source.reduce<ResolvedReactVNode[]>(
           (nodes, value) => nodes.concat(...flatten(value)),
           []
         );

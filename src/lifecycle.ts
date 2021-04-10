@@ -1,11 +1,12 @@
-import {
+import type {
   ComponentLifecycle as ReactComponentLifecycle,
   SetStateAction,
   StaticLifecycle as ReactStaticLifecycle,
-  Reducer as ReactReducer, useCallback, Dispatch
+  Reducer as ReactReducer,
+  Dispatch
 } from "react";
-import { ReactDispatcher } from "react-reconciler";
-import { ReactOptions, ReactVNode } from "./react";
+import type { ReactDispatcher } from "react-reconciler";
+import type { ReactVNode } from "./node";
 
 export type State = Record<string, unknown>;
 

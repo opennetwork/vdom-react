@@ -1,8 +1,10 @@
-import { Component as ReactComponent, ComponentClass as ReactComponentClass } from "react";
+import type { Component as ReactComponent, ComponentClass as ReactComponentClass } from "react";
 import { useReactComponentLifecycleRender } from "./lifecycle";
 import { isReactErrorBoundaryInstance } from "./type-guards";
-import { ErrorBoundarySymbol, ReactOptions, ReactVNode } from "./react";
-import { Dispatcher } from "./dispatcher";
+import type { ErrorBoundarySymbol, ReactOptions, ReactVNode } from "./node";
+import type { Dispatcher } from "./dispatcher";
+
+export type ComponentInstanceMap<P> = WeakMap<ReactComponentClass<P, unknown>, ReactComponent<P, unknown>>;
 
 export interface ComponentContext<P> {
   options: ReactOptions;
@@ -10,7 +12,7 @@ export interface ComponentContext<P> {
   dispatcher: Dispatcher;
   source: ReactComponentClass<P, unknown>;
   props: P;
-  instance: WeakMap<ReactComponentClass<P, unknown>, ReactComponent<P, unknown>>;
+  instance: ComponentInstanceMap<P>;
   node: ReactVNode;
   errorBoundarySymbol: ErrorBoundarySymbol;
 }

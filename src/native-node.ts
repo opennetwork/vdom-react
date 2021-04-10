@@ -1,9 +1,15 @@
 import { MutableRefObject, ReactElement } from "react";
-import { getDocumentNode, isElement, NativeAttributes, NativeOptionsVNode, setAttributes } from "@opennetwork/vdom";
+import {
+  DOMNativeVNode,
+  isElement,
+  NativeAttributes,
+  NativeOptionsVNode,
+  setAttributes
+} from "@opennetwork/vdom";
 import { DeferredActionCollector } from "./queue";
 import { eventProxy, eventProxyCapture, ProxiedListeners } from "./scoped-events";
 import { VNode } from "@opennetwork/vnode";
-import { DOMNativeVNodeInstance } from "@opennetwork/vdom/src/options";
+import { Native as DOMNative } from "@opennetwork/vdom";
 
 export interface NativeElement extends ReactElement {
   ref?: unknown;
@@ -12,7 +18,7 @@ export interface NativeElement extends ReactElement {
   children: AsyncIterable<ReadonlyArray<VNode>>;
 }
 
-export function Native(element: NativeElement): NativeOptionsVNode {
+export function Native(element: NativeElement): DOMNativeVNode {
   const { key, type: source, children } = element;
   const node: NativeOptionsVNode = {
     source,
@@ -23,7 +29,7 @@ export function Native(element: NativeElement): NativeOptionsVNode {
     children
   };
   node.options.onBeforeRender = onBeforeRender.bind(undefined, element, node);
-  return node;
+  return DOMNative(node.options, node);
 }
 
 async function onBeforeRender(context: NativeElement, node: NativeOptionsVNode, documentNode: Element & ProxiedListeners | Text) {

@@ -23,8 +23,8 @@ import {
 import { DeferredActionCollector } from "./queue";
 import { isReactContext, isSetStateFn } from "./type-guards";
 import { noop } from "./noop";
-import { deferred } from "./deferred";
 import { Collector } from "microtask-collector";
+import { createState, State } from "./state";
 
 export interface ReactContextDescriptor<T = unknown> {
   currentValue: T;
@@ -35,28 +35,17 @@ export interface ReactDispatcherContext {
   readonly contextMap?: Map<unknown, ReactContextDescriptor>;
 }
 
-export interface StateChanged {
-  readonly promise: Promise<void>;
-  readonly symbol: symbol;
-}
-
 export interface Dispatcher extends ReactDispatcher, WorkInProgressContext, ReactDispatcherContext {
-  readonly state: StateChanged;
+  readonly state: State;
   componentUpdateQueue?: FunctionComponentUpdateQueue;
   commitHookEffectList(tag: number): Promise<void>;
   destroyHookEffectList(tag: number): Promise<void>;
   beforeRender(): void;
-  stateChanged(): void;
 }
 
 export function createReactDispatcher(context: ReactDispatcherContext) {
   let componentUpdateQueue: FunctionComponentUpdateQueue | undefined = undefined;
-  const initialDeferred = deferred();
-
-  let onStateChange = initialDeferred.resolve;
-  let statePromise = initialDeferred.promise;
-  let stateChange = Symbol();
-
+  const state = createState();
   const dispatcher: Dispatcher = {
     ...createWorkInProgressContext(),
     ...context,
@@ -64,10 +53,7 @@ export function createReactDispatcher(context: ReactDispatcherContext) {
       eagerCollection: true
     }),
     get state() {
-      return {
-        promise: statePromise,
-        symbol: stateChange
-      };
+      return state;
     },
     get componentUpdateQueue() {
       return componentUpdateQueue;
@@ -75,7 +61,6 @@ export function createReactDispatcher(context: ReactDispatcherContext) {
     set componentUpdateQueue(value) {
       componentUpdateQueue = value;
     },
-    stateChanged,
     beforeRender,
     destroyHookEffectList,
     commitHookEffectList,
@@ -274,16 +259,8 @@ export function createReactDispatcher(context: ReactDispatcherContext) {
         return;
       }
       hook.memoizedState = nextState;
-      stateChanged();
+      state.change();
     });
-  }
-
-  function stateChanged() {
-    const { resolve, promise } = deferred();
-    statePromise = promise;
-    stateChange = Symbol();
-    onStateChange();
-    onStateChange = resolve;
   }
 
   function pushEffect(tag: number, create: EffectCallback, destroy: Destructor, deps?: unknown[]): WorkInProgressHookEffect {

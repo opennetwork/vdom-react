@@ -1,33 +1,24 @@
 import {
-  createVNode as createBasicVNode,
   Fragment,
   FragmentVNode,
-  isSourceReference,
-  isVNode,
   VNode
 } from "@opennetwork/vnode";
-import { NativeOptionsVNode } from "@opennetwork/vdom";
-import {
+import { DOMNativeVNode, NativeOptionsVNode } from "@opennetwork/vdom";
+import type {
   Context as ReactContext,
   ComponentClass as ReactComponentClass,
 } from "react";
-import { isPromise } from "iterable";
-import { Controller, RenderMeta } from "./controller";
-import { Deferred, deferred } from "./deferred";
-import { isAbortLifecycleError } from "./lifecycle";
+import { Controller } from "./controller";
 import {
   assertFragment,
   assertFunction,
   assertProps,
-  assertReactElement,
-  isReactComponent,
   isReactElement,
 } from "./type-guards";
 import { createReactDispatcher } from "./dispatcher";
-import { DeferredAction, DeferredActionCollector } from "./queue";
-import { renderComponent } from "./component";
-import { renderFunction } from "./function";
-import { transform } from "./transform";
+import { DeferredActionCollector } from "./queue";
+import { RenderContext, renderGenerator } from "./render";
+import { createState } from "./state";
 
 const IS_IN_REACT_TREE = Symbol("This component is part of a react tree");
 const CONTEXT = Symbol("Context");
@@ -37,6 +28,7 @@ const PARENT = Symbol("Parent ReactVNode");
 
 export type ErrorBoundarySymbol = typeof ERROR_BOUNDARY;
 export type ContextSymbol = typeof CONTEXT;
+export type ParentSymbol = typeof PARENT;
 
 export interface ContinueFn {
   (): boolean;
@@ -45,8 +37,8 @@ export type ContinueFlag = ContinueFn | undefined;
 
 const VNODE = Symbol("React VNode");
 
-export type ResolvedReactVNode = FragmentVNode | ReactVNode | NativeOptionsVNode;
-export type ReactVNodeChildren = ReadonlyArray<ResolvedReactVNode | (VNode & { native?: unknown })>;
+export type ResolvedReactVNode = FragmentVNode | ReactVNode | DOMNativeVNode;
+export type ReactVNodeChildren = ReadonlyArray<DOMNativeVNode>;
 
 export interface ReactVNode extends VNode {
   [VNODE]: true;
@@ -66,12 +58,6 @@ export function isReactVNode(node: VNode): node is ReactVNode {
     return !!node;
   }
   return isReactVNodeLike(node) && node[VNODE] === true;
-}
-
-export function assertReactVNode(node: VNode): asserts node is ReactVNode {
-  if (!isReactVNode(node)) {
-    throw new Error("Expected ReactVNode");
-  }
 }
 
 export interface ReactContextDescriptor<T = unknown> {
@@ -139,17 +125,15 @@ export function createVNode(options: Partial<ReactOptions>, node: VNode): ReactV
   assertFragment(reference);
 
   let currentProps: Props = props,
-    previousStateChange = Symbol(),
-    caughtError: unknown = undefined,
+    previousState = createState(),
     isDestroyable = false,
     destroyed = false,
-    rendering: Promise<void> | undefined,
     continueFlag: () => boolean | undefined = () => false;
 
   setCurrentProps(props);
 
   const controller = options[CONTROLLER];
-
+  let renderContext: RenderContext<Props>;
   const populatedNode: ReactVNode = {
     [VNODE]: true,
     reference: Fragment,
@@ -158,7 +142,7 @@ export function createVNode(options: Partial<ReactOptions>, node: VNode): ReactV
       setContinueFlag,
       updateQueue: dispatcher.updateQueue,
       get stateChanged() {
-        return dispatcher.state.symbol !== previousStateChange;
+        return dispatcher.state.symbol !== previousState.symbol;
       },
       get parent() {
         return options[PARENT];
@@ -166,8 +150,51 @@ export function createVNode(options: Partial<ReactOptions>, node: VNode): ReactV
       destroy
     },
     children: {
-      [Symbol.asyncIterator]: renderGenerator.bind(undefined, options, source)
+      async *[Symbol.asyncIterator]() {
+        yield *renderGenerator(renderContext, options, source);
+      }
     }
+  };
+  renderContext = {
+    dispatcher,
+    destroy: actuallyDestroy,
+    node: populatedNode,
+    createVNode,
+    get isDestroyable() {
+      return isDestroyable;
+    },
+    instance,
+    updateQueueIterator,
+    get previousProps() {
+      return previousProps;
+    },
+    set previousProps(value) {
+      previousProps = value;
+    },
+    errorBoundarySymbol: ERROR_BOUNDARY,
+    rendering: undefined,
+    parent: options[PARENT],
+    controller: options[CONTROLLER],
+    get currentProps() {
+      return currentProps;
+    },
+    set currentProps(value) {
+      currentProps = value;
+    },
+    get continueFlag() {
+      return continueFlag;
+    },
+    get previousState() {
+      return previousState;
+    },
+    set previousState(value) {
+      previousState = value;
+    },
+    get currentState() {
+      return dispatcher.state;
+    },
+    contextSymbol: CONTEXT,
+    parentSymbol: PARENT
   };
   controller.hello?.(populatedNode);
   return populatedNode;
@@ -176,8 +203,8 @@ export function createVNode(options: Partial<ReactOptions>, node: VNode): ReactV
     isDestroyable = true;
     if (destroyed) return;
     // Push an update where it will see that the component is destroyed
-    dispatcher.stateChanged();
-    while (!destroyed && rendering) await rendering;
+    dispatcher.state.change();
+    while (!destroyed && renderContext.rendering) await renderContext.rendering;
     if (!destroyed) {
       await actuallyDestroy();
     }
@@ -206,187 +233,10 @@ export function createVNode(options: Partial<ReactOptions>, node: VNode): ReactV
     }
     assertProps<Props>(props);
     currentProps = props;
-    dispatcher.stateChanged();
+    dispatcher.state.change();
   }
 
-  async function *renderGenerator(options: ReactOptions, source: () => unknown): AsyncIterable<ReadonlyArray<VNode>> {
-    const knownPromiseErrors = new WeakSet<Promise<unknown>>();
-    let renderedStateChange = previousStateChange,
-      renderedProps = previousProps,
-      renderMeta: RenderMeta,
-      renderDeferred: Deferred,
-      willContinue: boolean = true;
 
-    do {
-      dispatcher.beforeRender();
-
-      const renderingProps = currentProps;
-      const renderingStateChange = dispatcher.state.symbol;
-
-      renderMeta = {
-        parent: options[PARENT],
-        onError,
-        currentChange: renderingStateChange,
-        currentProps,
-        previousChange: renderedStateChange,
-        previousProps: renderedProps
-      };
-
-      if (renderedStateChange !== dispatcher.state.symbol) {
-        try {
-          if (!await controller.beforeRender?.(populatedNode, renderMeta)) break;
-          let renderResult;
-          renderDeferred = deferred();
-          rendering = renderDeferred.promise;
-          try {
-            renderResult = await render(options, source, renderingProps);
-          } catch (error) {
-            if (isAbortLifecycleError(error)) {
-              renderResult = undefined;
-            } else if (await onError(error)) {
-              break;
-            }
-          } finally {
-            renderDeferred.resolve();
-            if (renderDeferred.promise === rendering) {
-              rendering = undefined;
-            }
-          }
-          if (!renderResult) {
-            renderedStateChange = previousStateChange = renderingStateChange;
-            // This will jump to our update queue
-            continue;
-          }
-          const [latestValue, childrenOptions] = renderResult;
-          if (!dispatcher.hooked && !childrenOptions[IS_IN_REACT_TREE]) {
-            if (isVNode(latestValue) || isSourceReference(latestValue)) {
-              yield Object.freeze([createBasicVNode(latestValue)]);
-            } else {
-              yield Object.freeze([]);
-            }
-          }
-          if (!latestValue) {
-            yield Object.freeze([]);
-          } else {
-            assertReactElement(latestValue);
-            yield Object.freeze(
-              [
-                transform({
-                  updateQueue: dispatcher.updateQueue,
-                  createVNode,
-                  contextSymbol: CONTEXT,
-                  options: {
-                    ...childrenOptions,
-                    [PARENT]: populatedNode
-                  },
-                  element: latestValue
-                })
-              ]
-            );
-          }
-          // If we use the symbol that was present as render started, it allows for things to happen
-          // _while_ we render outside of this cycle
-          renderedStateChange = previousStateChange = renderingStateChange;
-          renderedProps = previousProps = renderingProps;
-        } catch (error) {
-          if (await onError(error)) {
-            break;
-          }
-        }
-        // This should be only done when we have rendered
-        await dispatcher.commitHookEffectList(0);
-      }
-      willContinue = (continueFlag?.() ?? true);
-      if (dispatcher.hooked && (willContinue || options[PARENT])) {
-        if (!(await waitForUpdates(!willContinue))) {
-          break;
-        }
-      }
-    } while (!isDestroyable && willContinue && (await controller.afterRender?.(populatedNode, renderMeta) ?? true) && dispatcher.hooked && options[CONTROLLER]?.aborted !== true && !caughtError);
-
-    if (caughtError) {
-      await actuallyDestroy();
-      await Promise.reject(caughtError);
-    }
-
-    async function waitForUpdates(detach: boolean): Promise<boolean> {
-      const update = async (): Promise<boolean> => {
-        const updateQueueIterationResult = await updateQueueIterator.next();
-        const results = await Promise.all([
-          (updateQueueIterationResult.value ?? []).map(async (fn: DeferredAction) => {
-            try {
-              await fn();
-            } catch (error) {
-              if (await renderMeta.onError(error)) {
-                return false;
-              }
-            }
-          })
-        ]);
-        return results.find(value => !value) ?? true;
-      };
-      const { parent } = renderMeta;
-      if (detach) {
-        if (parent) {
-          parent.options.updateQueue.add(update);
-        } else {
-          // Do nothing
-          return;
-        }
-      } else if (node === parent) {
-        return await update();
-      } else {
-        return await new Promise<boolean>(resolve => parent.options.updateQueue.add(async () => {
-          try {
-            await update();
-          } catch (error) {
-            if (await renderMeta.onError(error)) {
-              return resolve(false);
-            }
-          }
-          resolve(true);
-        }));
-      }
-    }
-
-    async function onError(error: unknown): Promise<boolean> {
-      if (isAbortLifecycleError(error)) {
-        return false;
-      } else if (isPromise(error)) {
-        const promiseError: Promise<unknown> = error;
-        // If we are here, and we know this error, it was already thrown and resolved
-        // Else we already know about it and it is in our update queue
-        if (!knownPromiseErrors.has(error)) {
-          dispatcher.updateQueue.add(() => promiseError);
-          knownPromiseErrors.add(error);
-        }
-        return false;
-      } else if (await options[ERROR_BOUNDARY](error)) {
-        // If the error boundary returned true, the error should be thrown later on
-        caughtError = error;
-        await updateQueueIterator.return?.();
-      }
-      return true;
-    }
-  }
-
-  async function render(options: ReactOptions, source: () => unknown, props: Props): Promise<[unknown, ReactOptions]>  {
-    if (isReactComponent<Props, Record<string, unknown>>(source)) {
-      return renderComponent({
-        options,
-        dispatcher,
-        previousProps,
-        errorBoundarySymbol: ERROR_BOUNDARY,
-        node: populatedNode,
-        source,
-        props,
-        instance
-      });
-    } else {
-      const renderResult = await renderFunction(source, dispatcher, props);
-      return [renderResult, options];
-    }
-  }
 
 
 }

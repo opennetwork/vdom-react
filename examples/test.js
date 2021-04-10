@@ -1,6 +1,5 @@
 import dom from "./jsdom.js";
 import { render } from "../dist/index.js";
-import {Fragment} from "@opennetwork/vnode";
 import {
   useEffect,
   useMemo,

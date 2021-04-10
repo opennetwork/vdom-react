@@ -1,6 +1,7 @@
 import { AbortSignal, CancellableSignal, isAborted, SimpleSignal } from "./cancellable";
-import { ReactVNode } from "./react";
-import { DeferredActionIterator } from "./queue";
+import type { ReactVNode } from "./node";
+import type { DeferredActionIterator } from "./queue";
+import type { State } from "./state";
 
 export interface ControllerOptions {
   signal?: CancellableSignal;
@@ -11,9 +12,9 @@ export interface RenderOptions {
 }
 
 export interface RenderMeta {
-  currentChange: symbol;
+  currentState: State;
   currentProps: unknown;
-  previousChange: symbol;
+  previousState: State;
   previousProps: unknown;
   onError(error: unknown): Promise<boolean> | boolean;
   parent?: ReactVNode;

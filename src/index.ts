@@ -1,47 +1,22 @@
 import { ReactElement } from "react";
-import { DOMVContext, Native, RenderOptions as DOMRenderOptions } from "@opennetwork/vdom";
+import { DOMNativeVNode, DOMVContext, Native, RenderOptions as DOMRenderOptions } from "@opennetwork/vdom";
 import { isReactVNode, createVNode } from "./node";
 import { createVNode as createBasicVNode, Fragment, hydrate, Tree, VNode } from "@opennetwork/vnode";
 import { Collector } from "microtask-collector";
 import { hydrateChildrenGroup } from "@opennetwork/vnode";
+import { ReactDOMVContext } from "./context";
 
 const contexts = new WeakMap<Element, DOMVContext>();
 
-interface RenderOptions extends DOMRenderOptions {
-  promise(promise: Promise<unknown>, node: VNode, tree?: Tree): void;
-}
-
-class ReactDOMVContext extends DOMVContext {
-
-  readonly #promise;
-
-  constructor(options: RenderOptions) {
-    super(options);
-    this.#promise = options.promise;
-  }
-
-  async commitChildren(documentNode: Element, node: VNode, tree?: Tree): Promise<void> {
-    const context = this.childContext(documentNode);
-
-    if (isReactVNode(node)) {
-      const continueFlag = () => {
-        return false;
-      };
-      node.options.setContinueFlag(continueFlag);
-    }
-
-    for await (const children of node.children) {
-      await hydrateChildrenGroup(context, node, tree, children);
-    }
-  }
-
-}
 
 export function render(node: ReactElement, root: Element): unknown {
+  return renderAsync(node, root);
+}
+
+export async function renderAsync(node: ReactElement, root: Element): Promise<DOMNativeVNode> {
   if (contexts.get(root)) {
     throw new Error("Double render is not currently supported");
   }
-
   const collector = new Collector({
     eagerCollection: true
   });
@@ -56,16 +31,16 @@ export function render(node: ReactElement, root: Element): unknown {
   const rootVNode = createVNode({}, { reference: Fragment, source: node, options: {} });
   rootVNode.options.setContinueFlag(() => true);
   const rootNativeNode = Native({}, createBasicVNode(Fragment, {}, rootVNode));
-  return Promise.all([
-    hydrate(context, rootNativeNode).then(close, close),
-    wait()
-  ])
-    .then(() => Promise.all(promises))
-    .then(() => context.close())
-    .catch(error => {
-      // Intentional catch + throw
-      throw error;
-    });
+  try {
+    await Promise.all([
+      hydrate(context, rootNativeNode).then(close, close),
+      wait()
+    ]);
+  } finally {
+    await context.close();
+    await Promise.all(promises);
+  }
+  return rootNativeNode;
 
   async function close() {
     collector.close();
