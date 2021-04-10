@@ -18,6 +18,7 @@ import {
   ReactNode,
   RefAttributes, SetStateAction
 } from "react";
+import { Fragment } from "@opennetwork/vnode";
 
 const throwAwayContext = createContext(undefined);
 const ReactProviderSymbol = throwAwayContext.Provider.$$typeof;
@@ -163,4 +164,22 @@ export function isReactErrorBoundaryInstance<P, S>(value: ReactComponent<P, S>):
 
 export function isSetStateFn<S>(initialState: SetStateAction<S>): initialState is ((state: S) => S) {
   return typeof initialState === "function";
+}
+
+export function assertFunction(source: unknown): asserts source is () => void {
+  if (typeof source !== "function") {
+    throw new Error("Expected function source");
+  }
+}
+
+export function assertFragment(reference: unknown): asserts reference is typeof Fragment {
+  if (reference !== Fragment) {
+    throw new Error("Expected fragment reference");
+  }
+}
+
+export function assertProps<P>(props: unknown): asserts props is P  {
+  if (!props) {
+    throw new Error("Expected props");
+  }
 }
