@@ -76,16 +76,16 @@ declare module "react-reconciler" {
   }
 
   export interface ReactDispatcher {
-    useRef?: typeof useRef;
-    useEffect?: typeof useEffect;
-    useCallback?: typeof useCallback;
-    useState?: typeof useState;
-    useMemo?: typeof useMemo;
-    useReducer?: typeof useReducer;
-    useContext?: typeof useContext;
-    useDebugValue?: typeof useDebugValue;
-    useImperativeHandle?: typeof useImperativeHandle;
-    useLayoutEffect?: typeof useLayoutEffect;
+    useRef: typeof useRef;
+    useEffect: typeof useEffect;
+    useCallback: typeof useCallback;
+    useState: typeof useState;
+    useMemo: typeof useMemo;
+    useReducer: typeof useReducer;
+    useContext: typeof useContext;
+    useDebugValue: typeof useDebugValue;
+    useImperativeHandle: typeof useImperativeHandle;
+    useLayoutEffect: typeof useLayoutEffect;
   }
 
   export interface SharedInternals {

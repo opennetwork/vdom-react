@@ -18,10 +18,15 @@
     esutils "^2.0.2"
     js-tokens "^4.0.0"
 
-"@opennetwork/progressive-merge@^5.0.2":
-  version "5.0.2"
-  resolved "https://registry.npmjs.org/@opennetwork/progressive-merge/-/progressive-merge-5.0.2.tgz#9e8c7e6b082d32fdc507eaeaa2d1e44cbf659655"
-  integrity sha512-pSeGNAvWkpdZkD2pf5xXfYidT5O0yvUPVRxax2ONeA+N4iNRTnv9CSH+f8DA3SgQGNcc6wKhmdTffdw2xuSQ8w==
+"@opennetwork/linked-list@^4.0.0":
+  version "4.0.0"
+  resolved "https://registry.npmjs.org/@opennetwork/linked-list/-/linked-list-4.0.0.tgz#69e25d0b00387f00da91faea2a5b77897d920712"
+  integrity sha512-aMEXPA0y3FZd5IlPPNVLHf5jxwNE9bo6d+5OgCsqZhRilftUuaytEnAS+7ggjiPekAtVDFl2okYROqtL3f02+g==
+
+"@opennetwork/progressive-merge@^5.1.1":
+  version "5.1.1"
+  resolved "https://registry.npmjs.org/@opennetwork/progressive-merge/-/progressive-merge-5.1.1.tgz#c4cf4086a47883cc25fea5bd38d15c1a81ae550d"
+  integrity sha512-GyDyKaQoEszWFzIjEO7MFrU4TCv6fTiXrKl3w+Fr4TU90cQ/gtFhO+vBq9aaqC/KvU8Rw1F4hbUBgV07SZDwoA==
 
 "@opennetwork/vdom@^10.1.1":
   version "10.1.1"
@@ -33,10 +38,10 @@
   resolved "https://registry.npmjs.org/@opennetwork/vnode-hooks/-/vnode-hooks-6.0.0.tgz#6c49801ab4f992fe89637aebba6fbd0d5190439f"
   integrity sha512-f293RTv4/nGD5bl/SLFMtOfxQDC4NvA2Xmk06GEHNHndPPP89/Q0aNBpzeUADSr6VeIp8IbkaebzRS3mU6elBg==
 
-"@opennetwork/vnode@^19.0.0":
-  version "19.0.0"
-  resolved "https://registry.npmjs.org/@opennetwork/vnode/-/vnode-19.0.0.tgz#11c328ad5f78cf39d2b4284ff4f890c93cd7a600"
-  integrity sha512-DlcChvHIqfBTlfK1uPj1Qw3GFEGF5Pwh1HaiQqDRuk1BAQQv4rNGyNkEKLWxschNuUFT1ytC1rEnheukhliCkw==
+"@opennetwork/vnode@^20.0.0":
+  version "20.0.0"
+  resolved "https://registry.npmjs.org/@opennetwork/vnode/-/vnode-20.0.0.tgz#aef5eb5e51c22dde0b6406f5c0dd05fa65740ab0"
+  integrity sha512-l7n0tYmhKC3IjWFBx9Tbcv8SJiHg4lE4klKP6lDSfxU3AVBbEx0qgXAvDW1NYH3L+ZwB1sdahFwqddV/bkfhig==
 
 "@types/node@^14.14.35":
   version "14.14.35"
@@ -607,10 +612,12 @@ loose-envify@^1.1.0:
   dependencies:
     js-tokens "^3.0.0 || ^4.0.0"
 
-microtask-collector@^1.0.5:
-  version "1.0.5"
-  resolved "https://registry.npmjs.org/microtask-collector/-/microtask-collector-1.0.5.tgz#7bc4dae99dfacc4b66459867f11db8939291c97e"
-  integrity sha512-lXyuOvxWDCdHw0lU8VA9XjywgaQauX9XlW9NvUwNTxGH7e7Ppoo6vS9h6uYMnWGfPCBzySv2EL4MLgyu2YLnKg==
+microtask-collector@^3.1.0:
+  version "3.1.0"
+  resolved "https://registry.npmjs.org/microtask-collector/-/microtask-collector-3.1.0.tgz#a2ab49c1d5ea436ecaed027373b8a19a53b84f79"
+  integrity sha512-hqriS8rmSdcrnyxY8c1yA7Zb1PKLEQxxm1A5d53ZzxaMSpOWbW98zdKnjtJU6BCSANCu5C3rfcyxldXcTUQS9w==
+  dependencies:
+    "@opennetwork/linked-list" "^4.0.0"
 
 mime-db@1.46.0:
   version "1.46.0"

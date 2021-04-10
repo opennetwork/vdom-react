@@ -42,8 +42,8 @@ export function render(node: ReactElement, root: Element): unknown {
     throw new Error("Double render is not currently supported");
   }
 
-  const collector = new Collector<Promise<unknown>, Promise<unknown>[]>({
-    map: (values) => values
+  const collector = new Collector({
+    eagerCollection: true
   });
   const context = new ReactDOMVContext({
     root,
