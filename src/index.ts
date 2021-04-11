@@ -1,7 +1,7 @@
 import { ReactElement } from "react";
 import { DOMNativeVNode, DOMVContext } from "@opennetwork/vdom";
 import { createVNode } from "./node";
-import { Fragment, hydrate } from "@opennetwork/vnode";
+import { Fragment, hydrate, Tree } from "@opennetwork/vnode";
 import { Collector } from "microtask-collector";
 import { ReactDOMVContext } from "./context";
 import { RenderContext } from "./render";
@@ -16,9 +16,9 @@ const roots = new WeakMap<DOMVContext, RenderContext>();
 const children = new WeakMap<RenderContext, Set<RenderContext>>();
 const nodes = new WeakMap<RenderContext, DOMNativeVNode>();
 
-interface RenderContextTree {
+interface RenderContextTree extends Tree {
   context: RenderContext;
-  children: RenderContextTree[];
+  childrenTrees: RenderContextTree[];
 }
 
 interface RenderDetails {
@@ -66,8 +66,17 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   const promises = new Set<Promise<unknown>>();
   const accumulativePromise = wait();
 
-  let rootQueue: DOMNativeVNode[] = [
-    createVNodeFromElement(element)
+  const node = createVNodeFromElement(element);
+
+  if (!rootRenderContext) {
+    await Promise.reject(new Error("Expected root render context"));
+  }
+
+  let rootQueue: [DOMNativeVNode, RenderContextTree][] = [
+    [
+      node,
+      buildTree(rootRenderContext)
+    ]
   ];
 
   let rootNativeNode: DOMNativeVNode | undefined;
@@ -75,16 +84,12 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   try {
     // Hydrate at least once no matter what
     do {
-      rootNativeNode = await getNextRoot();
+      [rootNativeNode, tree] = await getNextRoot();
       if (!rootNativeNode) {
         break;
       }
 
-      await hydrate(context, rootNativeNode);
-
-      if (!rootRenderContext) {
-        await Promise.reject(new Error("Expected root render context"));
-      }
+      await hydrate(context, rootNativeNode, tree);
 
       await options.rendered?.({
         remainingRootsToFlush: rootQueue.length
@@ -104,7 +109,7 @@ export async function renderAsync(element: ReactElement, root: Element, options:
         await Promise.reject(new Error("Expected at least one change since waitForTreeChange, rollback isn't yet implemented?"));
       }
 
-      rootQueue = changes.map(tree => nodes.get(tree.context)).filter(Boolean);
+      rootQueue = changes.map((tree): [DOMNativeVNode, RenderContextTree] => [nodes.get(tree.context), tree]).filter(Boolean);
     } while (!isComplete(tree));
   } catch (error) {
     console.error(error);
@@ -123,7 +128,7 @@ export async function renderAsync(element: ReactElement, root: Element, options:
     if (context.currentState.symbol !== context.previousState.symbol) {
       return [tree];
     } else {
-      return tree.children.reduce<RenderContextTree[]>(
+      return tree.childrenTrees.reduce<RenderContextTree[]>(
         (changes, tree) => changes.concat(getChanges(tree)),
         []
       );
@@ -133,19 +138,25 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   function waitForTreeChange(tree: RenderContextTree): Promise<void> {
     return Promise.any([
       tree.context.dispatcher.state.promise,
-      ...tree.children.map(waitForTreeChange)
+      ...tree.childrenTrees.map(waitForTreeChange)
     ]);
   }
 
   function buildTree(context: RenderContext): RenderContextTree {
+    const childrenArray = [...(children.get(context) ?? [])];
     return {
       context,
-      children: [...(children.get(context) ?? [])]
-        .map(buildTree)
+      reference: reference(context),
+      children: Object.freeze(childrenArray.map(reference)),
+      childrenTrees: childrenArray.map(buildTree)
     };
+
+    function reference(context: RenderContext) {
+      return nodes.get(context)?.reference ?? Symbol("Unknown context node");
+    }
   }
 
-  async function getNextRoot(): Promise<DOMNativeVNode | undefined> {
+  async function getNextRoot(): Promise<[DOMNativeVNode, RenderContextTree] | undefined> {
     return rootQueue.shift();
   }
 

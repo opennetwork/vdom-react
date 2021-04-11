@@ -31,9 +31,6 @@ export class ReactDOMVContext extends DOMVContext implements Controller {
   }
 
   hydrate(node: VNode, tree?: Tree): Promise<void> {
-
-
-
     return super.hydrate(node, tree);
   }
 

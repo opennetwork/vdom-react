@@ -114,7 +114,6 @@ export function createVNode(options: Partial<Options>, node: VNode): DOMNativeVN
           }
           let yielded = false;
           for await (const nextChildren of renderGenerator(renderContext)) {
-            console.log({ nextChildren, latestChildren });
             latestChildren = nextChildren;
             yield nextChildren;
             yielded = true;
