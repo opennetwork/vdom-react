@@ -104,7 +104,9 @@ export function createVNode(options: Partial<Options>, node: VNode): DOMNativeVN
   };
   let latestChildren: DOMNativeVNode[] | undefined = undefined;
   const native = Native(
-    {},
+    {
+      source
+    },
     {
       reference: Fragment,
       children: {

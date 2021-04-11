@@ -2,7 +2,6 @@ import { WorkInProgressHook } from "react-reconciler";
 
 export interface WorkInProgressContext {
   hookIndex: number;
-  keyedHooks: Map<unknown, WorkInProgressHook>;
   indexedHooks: Map<unknown, WorkInProgressHook>;
   hooked: boolean;
 }
@@ -11,17 +10,16 @@ export function createWorkInProgressContext(): WorkInProgressContext {
   return {
     hooked: false,
     hookIndex: -1,
-    keyedHooks: new Map(),
     indexedHooks: new Map()
   };
 }
 
-export function useWorkInProgress<MemoizedState, Queue = unknown>(context: WorkInProgressContext, key?: unknown, unref?: boolean): WorkInProgressHook<MemoizedState, Queue> {
+export function useWorkInProgress<MemoizedState, Queue = unknown>(context: WorkInProgressContext, unref?: boolean): WorkInProgressHook<MemoizedState, Queue> {
   if (!unref) {
     context.hooked = true;
   }
-  const resolvedKey = key ?? (context.hookIndex += 1);
-  const map = resolvedKey === key ? context.keyedHooks : context.indexedHooks;
+  const resolvedKey = context.hookIndex += 1;
+  const map = context.indexedHooks;
   const current = map.get(resolvedKey);
   if (isWorkInProgressHook(current)) {
     return current;

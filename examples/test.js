@@ -75,6 +75,7 @@ function A() {
       if ((count += 1) > 3) {
         clearInterval(interval);
       } else {
+        console.log("on state");
         onState();
       }
     }, 300);
@@ -135,7 +136,7 @@ function Component() {
   });
 
   return createElement(
-    Forwarded,
+    A,
     {
       ref: undefined
     },

@@ -12,7 +12,14 @@ import { renderFunction } from "./function";
 import type { Options, createVNode } from "./node";
 import type { Dispatcher } from "./dispatcher";
 import type { State } from "./state";
-import { DOMNativeVNode, Native } from "@opennetwork/vdom";
+import {
+  ElementDOMNativeVNode,
+  Native,
+  isFragmentDOMNativeVNode,
+  isElementDOMNativeVNode,
+  DOMNativeVNode
+} from "@opennetwork/vdom";
+import { noop } from "./noop";
 
 export interface RenderContext<P = unknown> {
   readonly options: Options;
@@ -34,7 +41,7 @@ export interface RenderContext<P = unknown> {
   source: () => unknown;
 }
 
-export async function *renderGenerator<P>(context: RenderContext<P>): AsyncIterable<DOMNativeVNode[]> {
+export async function *renderGenerator<P>(context: RenderContext<P>): AsyncIterable<ElementDOMNativeVNode[]> {
   const {
     dispatcher,
     parent,
@@ -57,7 +64,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
     dispatcher.beforeRender();
 
     const renderingProps = context.currentProps;
-    const renderingState = dispatcher.state;
+    const renderingState = context.currentState;
 
     renderMeta = {
       parent,
@@ -89,7 +96,10 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
           }
         }
         if (!renderResult) {
-          renderedState = context.previousState = renderingState;
+          renderedState = context.previousState = {
+            ...renderingState,
+            change: noop
+          };
           // This will jump to our update queue
           continue;
         }
@@ -97,7 +107,8 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
         if (!dispatcher.hooked) {
           const node = isVNode(latestValue) ? latestValue : isSourceReference(latestValue) ? createBasicVNode(latestValue) : undefined;
           if (node) {
-            yield [Native(node.options, node)];
+            const native = (isElementDOMNativeVNode(node) || isFragmentDOMNativeVNode(node)) ? node : Native(node.options, node);
+            yield *flatten(native);
           } else {
             yield [];
           }
@@ -106,21 +117,22 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
           yield [];
         } else {
           assertReactElement(latestValue);
-          yield [
-            transform({
-              updateQueue: dispatcher.updateQueue,
-              createVNode: context.createVNode,
-              options: {
-                ...childrenOptions,
-                parent: context
-              },
-              element: latestValue
-            })
-          ];
+          yield *flatten(transform({
+            updateQueue: dispatcher.updateQueue,
+            createVNode: context.createVNode,
+            options: {
+              ...childrenOptions,
+              parent: context
+            },
+            element: latestValue
+          }));
         }
         // If we use the symbol that was present as render started, it allows for things to happen
         // _while_ we render outside of this cycle
-        renderedState = context.previousState = renderingState;
+        renderedState = context.previousState = {
+          ...renderingState,
+          change: noop
+        };
         renderedProps = context.previousProps = renderingProps;
       } catch (error) {
         if (await onError(error)) {
@@ -141,6 +153,18 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
   if (caughtError) {
     await destroy();
     await Promise.reject(caughtError);
+  }
+
+  async function *flatten(native: DOMNativeVNode): AsyncIterable<ElementDOMNativeVNode[]> {
+    if (isFragmentDOMNativeVNode(native)) {
+      for await (const elements of native.children) {
+        yield elements;
+      }
+    } else if (isElementDOMNativeVNode(native)) {
+      yield [native];
+    } else {
+      throw new Error("Expected FragmentDOMNativeVNode or isElementDOMNativeVNode");
+    }
   }
 
   async function waitForUpdates(detach: boolean): Promise<boolean> {
