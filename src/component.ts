@@ -1,29 +1,16 @@
 import type { Component as ReactComponent, ComponentClass as ReactComponentClass } from "react";
 import { useReactComponentLifecycleRender } from "./lifecycle";
 import { isReactErrorBoundaryInstance } from "./type-guards";
-import type { ErrorBoundarySymbol, ReactOptions, ReactVNode } from "./node";
-import type { Dispatcher } from "./dispatcher";
+import type { Options } from "./node";
+import type { RenderContext } from "./render";
 
 export type ComponentInstanceMap<P> = WeakMap<ReactComponentClass<P, unknown>, ReactComponent<P, unknown>>;
 
-export interface ComponentContext<P> {
-  options: ReactOptions;
-  previousProps: P;
-  dispatcher: Dispatcher;
-  source: ReactComponentClass<P, unknown>;
-  props: P;
-  instance: ComponentInstanceMap<P>;
-  node: ReactVNode;
-  errorBoundarySymbol: ErrorBoundarySymbol;
-}
-
-export async function renderComponent<P>(context: ComponentContext<P>): Promise<[unknown, ReactOptions] | undefined>  {
+export async function renderComponent<P>(context: RenderContext<P>, source: ReactComponentClass<P, unknown>): Promise<[unknown, Options] | undefined>  {
   const {
     instance,
-    source,
-    props,
+    currentProps: props,
     options,
-    node,
     dispatcher,
     previousProps
   } = context;
@@ -31,11 +18,10 @@ export async function renderComponent<P>(context: ComponentContext<P>): Promise<
   if (!currentInstance) {
     const newInstance = new source(props);
     instance.set(source, newInstance);
-    return renderComponent(context);
+    return renderComponent(context, source);
   }
 
   const renderResult = useReactComponentLifecycleRender({
-    node,
     dispatcher,
     previousProps,
     stateContainer: currentInstance,
@@ -45,11 +31,11 @@ export async function renderComponent<P>(context: ComponentContext<P>): Promise<
     render: currentInstance.render,
   });
 
-  const childrenOptions: ReactOptions = {
+  const childrenOptions: Options = {
     ...options
   };
 
-  const errorBoundary = useErrorBoundary(context, currentInstance);
+  const errorBoundary = useErrorBoundary(context, currentInstance, source);
   if (isReactErrorBoundaryInstance(currentInstance) || source.getDerivedStateFromError) {
     childrenOptions[context.errorBoundarySymbol] = errorBoundary;
   }
@@ -57,9 +43,8 @@ export async function renderComponent<P>(context: ComponentContext<P>): Promise<
   return [renderResult, childrenOptions];
 }
 
-function useErrorBoundary<S, P>(context: ComponentContext<P>, instance: ReactComponent<P, unknown>) {
+function useErrorBoundary<S, P>(context: RenderContext<P>, instance: ReactComponent<P, unknown>, source: ReactComponentClass<P, unknown>) {
   const {
-    source,
     dispatcher,
   } = context;
   return dispatcher.useCallback((error: unknown): boolean => {

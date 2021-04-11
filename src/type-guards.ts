@@ -140,7 +140,7 @@ export function assertReactElement(value: unknown): asserts value is ReactElemen
   }
 }
 
-export function isReactComponent<T, S extends object = Record<string, unknown>>(value: unknown): value is ReactComponentClass<T, S> {
+export function isReactComponentClass<T, S extends object = Record<string, unknown>>(value: unknown): value is ReactComponentClass<T, S> {
   function isPrototypeLike(value: unknown): value is { prototype: unknown } {
     return typeof value === "function";
   }
@@ -148,6 +148,12 @@ export function isReactComponent<T, S extends object = Record<string, unknown>>(
     isPrototypeLike(value) &&
     value.prototype instanceof ReactComponent
   );
+}
+
+export function assertReactComponentClass<T, S extends object = Record<string, unknown>>(value: unknown): asserts value is ReactComponentClass<T, S> {
+  if (!isReactComponentClass(value)) {
+    throw new Error("Expected ReactComponentClass");
+  }
 }
 
 export function isReactErrorBoundaryInstance<P, S>(value: ReactComponent<P, S>): value is InstanceType<ReactComponentClass<P, S>> {

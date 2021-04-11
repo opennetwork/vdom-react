@@ -1,28 +1,28 @@
-import { isSourceReference, isVNode, VNode } from "@opennetwork/vnode";
+import { isSourceReference, isVNode } from "@opennetwork/vnode";
 import { Controller, RenderMeta } from "./controller";
 import { deferred, Deferred } from "./deferred";
 import { isAbortLifecycleError } from "./lifecycle";
 import { createVNode as createBasicVNode } from "@opennetwork/vnode";
-import { assertReactElement, isReactComponent } from "./type-guards";
+import { assertReactElement, isReactComponentClass } from "./type-guards";
 import { transform } from "./transform";
 import { DeferredAction, DeferredActionIterator } from "./queue";
 import { isPromise } from "iterable";
 import { ComponentInstanceMap, renderComponent } from "./component";
 import { renderFunction } from "./function";
-import type { ReactOptions, ReactVNode, createVNode, ContextSymbol, ParentSymbol, ErrorBoundarySymbol } from "./node";
+import type { Options, createVNode, ContextSymbol, ParentSymbol, ErrorBoundarySymbol } from "./node";
 import type { Dispatcher } from "./dispatcher";
 import type { State } from "./state";
 import { DOMNativeVNode, Native } from "@opennetwork/vdom";
 
-export interface RenderContext<P> {
+export interface RenderContext<P = unknown> {
+  readonly options: Options;
   readonly currentState: State;
   previousState: State;
   previousProps: P;
   currentProps: P;
   readonly dispatcher: Dispatcher;
-  parent?: ReactVNode;
+  parent?: RenderContext;
   controller?: Controller;
-  node: ReactVNode;
   rendering: Promise<void>;
   createVNode: typeof createVNode;
   contextSymbol: ContextSymbol;
@@ -30,19 +30,21 @@ export interface RenderContext<P> {
   errorBoundarySymbol: ErrorBoundarySymbol;
   continueFlag?: () => boolean;
   readonly isDestroyable: boolean;
+  readonly destroyed: boolean;
   destroy(): void;
   updateQueueIterator: DeferredActionIterator;
   instance: ComponentInstanceMap<P>;
+  source: () => unknown;
 }
 
-export async function *renderGenerator<P>(context: RenderContext<P>, options: ReactOptions, source: () => unknown): AsyncIterable<ReadonlyArray<DOMNativeVNode>> {
+export async function *renderGenerator<P>(context: RenderContext<P>): AsyncIterable<DOMNativeVNode[]> {
   const {
     dispatcher,
     parent,
     controller,
-    node,
     destroy,
-    updateQueueIterator
+    updateQueueIterator,
+    options
   } = context;
 
   const knownPromiseErrors = new WeakSet<Promise<unknown>>();
@@ -71,12 +73,12 @@ export async function *renderGenerator<P>(context: RenderContext<P>, options: Re
 
     if (renderedState.symbol !== renderingState.symbol) {
       try {
-        if (!await controller?.beforeRender?.(node, renderMeta)) break;
+        if (!await controller?.beforeRender?.(context, renderMeta)) break;
         let renderResult;
         renderDeferred = deferred();
         context.rendering = renderDeferred.promise;
         try {
-          renderResult = await render(context, options, source, renderingProps);
+          renderResult = await render(context);
         } catch (error) {
           if (isAbortLifecycleError(error)) {
             renderResult = undefined;
@@ -98,29 +100,27 @@ export async function *renderGenerator<P>(context: RenderContext<P>, options: Re
         if (!dispatcher.hooked) {
           const node = isVNode(latestValue) ? latestValue : isSourceReference(latestValue) ? createBasicVNode(latestValue) : undefined;
           if (node) {
-            yield Object.freeze([Native(node.options, node)]);
+            yield [Native(node.options, node)];
           } else {
-            yield Object.freeze([]);
+            yield [];
           }
         }
         if (!latestValue) {
-          yield Object.freeze([]);
+          yield [];
         } else {
           assertReactElement(latestValue);
-          yield Object.freeze(
-            [
-              transform({
-                updateQueue: dispatcher.updateQueue,
-                createVNode: context.createVNode,
-                contextSymbol: context.contextSymbol,
-                options: {
-                  ...childrenOptions,
-                  [context.parentSymbol]: node
-                },
-                element: latestValue
-              })
-            ]
-          );
+          yield [
+            transform({
+              updateQueue: dispatcher.updateQueue,
+              createVNode: context.createVNode,
+              contextSymbol: context.contextSymbol,
+              options: {
+                ...childrenOptions,
+                [context.parentSymbol]: context
+              },
+              element: latestValue
+            })
+          ];
         }
         // If we use the symbol that was present as render started, it allows for things to happen
         // _while_ we render outside of this cycle
@@ -140,7 +140,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>, options: Re
         break;
       }
     }
-  } while (!context.isDestroyable && willContinue && (await controller.afterRender?.(node, renderMeta) ?? true) && dispatcher.hooked && controller?.aborted !== true && !caughtError);
+  } while (!context.isDestroyable && willContinue && (await controller?.afterRender?.(context, renderMeta) ?? true) && dispatcher.hooked && controller?.aborted !== true && !caughtError);
 
   if (caughtError) {
     await destroy();
@@ -166,15 +166,15 @@ export async function *renderGenerator<P>(context: RenderContext<P>, options: Re
     const { parent } = renderMeta;
     if (detach) {
       if (parent) {
-        parent.options.updateQueue.add(update);
+        parent.dispatcher.updateQueue.add(update);
       } else {
         // Do nothing
         return;
       }
-    } else if (node === parent) {
+    } else if (context === parent) {
       return await update();
     } else {
-      return await new Promise<boolean>(resolve => parent.options.updateQueue.add(async () => {
+      return await new Promise<boolean>(resolve => parent.dispatcher.updateQueue.add(async () => {
         try {
           await update();
         } catch (error) {
@@ -208,16 +208,12 @@ export async function *renderGenerator<P>(context: RenderContext<P>, options: Re
   }
 }
 
-export async function render<P>(context: RenderContext<P>, options: ReactOptions, source: () => unknown, props: P): Promise<[unknown, ReactOptions]>  {
-  if (isReactComponent<P, Record<string, unknown>>(source)) {
-    return renderComponent({
-      ...context,
-      options,
-      source,
-      props,
-    });
+export async function render<P>(context: RenderContext<P>): Promise<[unknown, Options]>  {
+  const { source, currentProps: props } = context;
+  if (isReactComponentClass<P, Record<string, unknown>>(source)) {
+    return renderComponent(context, source);
   } else {
     const renderResult = await renderFunction(source, context.dispatcher, props);
-    return [renderResult, options];
+    return [renderResult, context.options];
   }
 }

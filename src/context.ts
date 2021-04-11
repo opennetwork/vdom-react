@@ -1,15 +1,21 @@
 import { RenderOptions as DOMRenderOptions } from "@opennetwork/vdom/dist/context";
-import { hydrateChildrenGroup, Tree, VNode } from "@opennetwork/vnode";
+import { Tree, VNode } from "@opennetwork/vnode";
 import { DOMVContext } from "@opennetwork/vdom";
-import { isReactVNode } from "./node";
+import { SimpleSignal } from "./cancellable";
+import { Controller } from "./controller";
 
 export interface RenderOptions extends DOMRenderOptions {
   promise(promise: Promise<unknown>, node: VNode, tree?: Tree): void;
 }
 
-export class ReactDOMVContext extends DOMVContext {
+export class ReactDOMVContext extends DOMVContext implements Controller {
 
+  readonly #signal = new SimpleSignal();
   readonly #promise;
+
+  get aborted() {
+    return this.#signal.aborted;
+  }
 
   constructor(options: RenderOptions) {
     super(options);

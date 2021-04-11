@@ -6,7 +6,6 @@ import type {
   Dispatch
 } from "react";
 import type { ReactDispatcher } from "react-reconciler";
-import type { ReactVNode } from "./node";
 
 export type State = Record<string, unknown>;
 
@@ -21,7 +20,6 @@ export interface RenderFn<S extends State = State, P = unknown, O = unknown> {
 }
 
 export interface LifecycleContext<P = unknown, S extends State = State, O = unknown> {
-  node: ReactVNode;
   dispatcher: ReactDispatcher;
   staticLifecycle: ReactStaticLifecycle<P, S>;
   lifecycle: ReactComponentLifecycle<P, S>;

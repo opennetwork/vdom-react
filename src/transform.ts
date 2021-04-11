@@ -4,15 +4,15 @@ import {
   isReactContextProviderElement, isReactElement, isReactForwardRefExoticComponent,
   isReactForwardRefExoticElement
 } from "./type-guards";
-import { Fragment, isSourceReference } from "@opennetwork/vnode";
+import { Fragment, isSourceReference, VNode } from "@opennetwork/vnode";
 import { createRef, Fragment as ReactFragment, ReactElement } from "react";
 import type { DOMNativeVNode, NativeOptionsVNode } from "@opennetwork/vdom";
-import type { ContextSymbol, createVNode, ReactOptions, ResolvedReactVNode } from "./node";
+import type { ContextSymbol, createVNode, Options } from "./node";
 import { Native as DOMNative } from "@opennetwork/vdom";
 import { Native } from "./native-node";
 
 export interface TransformContext {
-  options: Partial<ReactOptions>;
+  options: Partial<Options>;
   updateQueue: DeferredActionCollector;
   element: unknown;
   contextSymbol: ContextSymbol;
@@ -24,7 +24,7 @@ export function transform(context: TransformContext): DOMNativeVNode {
   return DOMNative(node.options, node);
 }
 
-export function initialTransform(context: TransformContext): ResolvedReactVNode {
+export function initialTransform(context: TransformContext): VNode {
   const {
     element,
     updateQueue,
@@ -69,7 +69,7 @@ export function initialTransform(context: TransformContext): ResolvedReactVNode 
     }
     const { render: source } = type;
     const render = source.bind(undefined, props, ref || createRef());
-    return createVNode(context.options, { reference: Fragment, source: render, options: props || {} });
+    return createVNode({}, { reference: Fragment, source: render, options: props || {} });
   } else if (isReactElement(element)) {
     const { type, props, ref, key }: ReactElement & { ref?: unknown } = element;
     if (type === ReactFragment) {
@@ -77,7 +77,7 @@ export function initialTransform(context: TransformContext): ResolvedReactVNode 
         reference: Fragment,
         options: {},
         source: element,
-        children: flattenChildren(element.props.children, context.options)
+        children: flattenChildren(element.props.children, context)
       };
     } else if (typeof type === "function") {
       return createVNode(context.options, { reference: Fragment, source: type, options: props || {} });
@@ -86,7 +86,7 @@ export function initialTransform(context: TransformContext): ResolvedReactVNode 
         type,
         props,
         ref: ref,
-        children: flattenChildren(props.children, context.options),
+        children: flattenChildren(props.children, context),
         collector: updateQueue,
         key: key
       });
@@ -94,11 +94,10 @@ export function initialTransform(context: TransformContext): ResolvedReactVNode 
   }
   return { reference: Fragment, source: element };
 
-  async function *flattenChildren(children: unknown, c: Partial<ReactOptions>): AsyncIterable<ReadonlyArray<ResolvedReactVNode>> {
+  async function *flattenChildren(children: unknown, context: TransformContext): AsyncIterable<ReadonlyArray<VNode>> {
     return yield flatten(children);
 
-    function flatten(source: unknown): ResolvedReactVNode[] {
-      console.log({ source });
+    function flatten(source: unknown): VNode[] {
       if (isSourceReference(source)) {
         // Bypass the native layer and make it a text node straight away
         const native: NativeOptionsVNode = {
@@ -108,12 +107,11 @@ export function initialTransform(context: TransformContext): ResolvedReactVNode 
           },
           source: String(source)
         };
-        console.log({ native, e: DOMNative(native.options, native) });
         return [
           DOMNative(native.options, native)
         ];
       } else if (Array.isArray(source)) {
-        return source.reduce<ResolvedReactVNode[]>(
+        return source.reduce<VNode[]>(
           (nodes, value) => nodes.concat(...flatten(value)),
           []
         );
