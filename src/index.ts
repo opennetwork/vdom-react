@@ -101,13 +101,18 @@ export async function renderAsync(element: ReactElement, root: Element, options:
 
       tree = buildTree(rootRenderContext);
 
+      if (!anyHooked(tree)) {
+        break;
+      }
+
       setQueues(tree, knownQueues);
 
       if (knownQueues.size && !processQueuesPromise) {
         promise(processQueuesPromise = processQueues());
       }
 
-      const nextTree = getChanges(tree)[0] ?? await waitForTreeChange(tree);
+
+      const nextTree = await waitForTreeChange(tree);
 
       rootQueue.push([
         nodes.get(nextTree.context),
@@ -125,6 +130,13 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   }
 
   return [rootNativeNode, context];
+
+  function anyHooked(tree: RenderContextTree): boolean {
+    return (
+      tree.context.dispatcher.hooked ||
+      tree.childrenTrees.findIndex(anyHooked) > -1
+    );
+  }
 
   function getChanges(tree: RenderContextTree): RenderContextTree[] {
     const { context } = tree;
