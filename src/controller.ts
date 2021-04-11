@@ -1,6 +1,7 @@
-import { AbortSignal } from "./cancellable";
+import type { AbortSignal } from "./cancellable";
 import type { State } from "./state";
 import type { RenderContext } from "./render";
+import type { DOMNativeVNode } from "@opennetwork/vdom";
 
 export interface RenderMeta {
   currentState: State;
@@ -12,9 +13,10 @@ export interface RenderMeta {
 }
 
 export interface Controller extends AbortSignal {
-  hello?(node: RenderContext): void;
-  beforeRender?(context: RenderContext, meta: RenderMeta): Promise<boolean>;
-  afterRender?(context: RenderContext, meta: RenderMeta): Promise<boolean>;
-  beforeDestroyed?(context: RenderContext): Promise<void>;
-  afterDestroyed?(context: RenderContext): Promise<void>;
+  hello?(renderContext: RenderContext, node: DOMNativeVNode): void;
+  willContinue?(renderContext: RenderContext, meta: RenderMeta): boolean | Promise<boolean>;
+  beforeRender?(renderContext: RenderContext, meta: RenderMeta): boolean | Promise<boolean>;
+  afterRender?(renderContext: RenderContext, meta: RenderMeta): boolean | Promise<boolean>;
+  beforeDestroyed?(renderContext: RenderContext): void | Promise<void>;
+  afterDestroyed?(renderContext: RenderContext): void | Promise<void>;
 }

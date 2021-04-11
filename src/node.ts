@@ -1,42 +1,11 @@
-import { Fragment, FragmentVNode, VNode } from "@opennetwork/vnode";
+import { Fragment, VNode } from "@opennetwork/vnode";
 import { DOMNativeVNode, Native } from "@opennetwork/vdom";
 import type { ComponentClass as ReactComponentClass, Context as ReactContext, } from "react";
 import { Controller } from "./controller";
-import { assertFragment, assertFunction, assertProps, isReactElement, } from "./type-guards";
+import { assertFragment, assertFunction, assertProps, isReactElement } from "./type-guards";
 import { createReactDispatcher } from "./dispatcher";
-import { DeferredActionCollector } from "./queue";
 import { RenderContext, renderGenerator } from "./render";
 import { createState } from "./state";
-
-const IS_IN_REACT_TREE = Symbol("This component is part of a react tree");
-const CONTEXT = Symbol("Context");
-const ERROR_BOUNDARY = Symbol("Error Boundary");
-const CONTROLLER = Symbol("Controller");
-const PARENT = Symbol("Parent ReactVNode");
-
-export type ErrorBoundarySymbol = typeof ERROR_BOUNDARY;
-export type ContextSymbol = typeof CONTEXT;
-export type ParentSymbol = typeof PARENT;
-
-export interface ContinueFn {
-  (): boolean;
-}
-export type ContinueFlag = ContinueFn | undefined;
-
-const VNODE = Symbol("React VNode");
-
-// export interface ReactVNode extends VNode {
-//   [VNODE]: true;
-//   options: Record<symbol | string, unknown> & {
-//     setProps(props: object): void;
-//     updateQueue: DeferredActionCollector,
-//     readonly stateChanged: boolean;
-//     readonly parent?: ReactVNode
-//     destroy(): Promise<void>;
-//     setContinueFlag(continueFlag: ContinueFlag): void
-//   };
-//   children: AsyncIterable<ReactVNodeChildren>;
-// }
 
 export interface ReactContextDescriptor<T = unknown> {
   currentValue: T;
@@ -45,14 +14,15 @@ export interface ReactContextDescriptor<T = unknown> {
 export type ReactContextMap = Map<ReactContext<unknown>, ReactContextDescriptor>;
 
 export interface Options extends Record<string | symbol, unknown> {
-  [CONTROLLER]?: Controller;
-  [CONTEXT]: ReactContextMap;
-  [ERROR_BOUNDARY](error: unknown): boolean;
-  [PARENT]?: RenderContext;
+  controller?: Controller;
+  contextMap: ReactContextMap;
+  // Returns false if error should be ignored, or true to throw it further
+  errorBoundary(error: unknown): boolean;
+  parent?: RenderContext;
 }
 
 export function isOptions(options: Partial<Options>): options is Options {
-  return !!(options[CONTEXT] && options[ERROR_BOUNDARY]);
+  return !!(options.contextMap && options.errorBoundary);
 }
 
 export function createVNode(options: Partial<Options>, node: VNode): DOMNativeVNode {
@@ -60,10 +30,8 @@ export function createVNode(options: Partial<Options>, node: VNode): DOMNativeVN
 
   if (!isOptions(options)) {
     const completeOptions: Options = {
-      [CONTEXT]: new Map(),
-      [ERROR_BOUNDARY]: (error) => {
-        throw error;
-      },
+      contextMap: new Map(),
+      errorBoundary: () => true,
       ...options
     };
     return createVNode(
@@ -87,25 +55,23 @@ export function createVNode(options: Partial<Options>, node: VNode): DOMNativeVN
     __isProps: typeof PROPS_BRAND
   } & Record<string, unknown>;
 
-  let previousProps: Props | undefined = undefined;
-
-  const instance = new Map<ReactComponentClass<Props, unknown>, InstanceType<ReactComponentClass<Props, unknown>>>();
-
-  const dispatcher = createReactDispatcher({
-    contextMap: options[CONTEXT]
-  });
-  const updateQueueIterator = dispatcher.updateQueue[Symbol.asyncIterator]();
-
   const { source, reference, options: props = {} } = node;
 
   assertProps<Props>(props);
   assertFunction(source);
   assertFragment(reference);
 
+  let previousProps: Props | undefined = undefined;
+  const instance = new Map<ReactComponentClass<Props, unknown>, InstanceType<ReactComponentClass<Props, unknown>>>();
+  const dispatcher = createReactDispatcher({
+    contextMap: options.contextMap
+  });
+  const updateQueueIterator = dispatcher.updateQueue[Symbol.asyncIterator]();
+
   let isDestroyable = false,
     destroyed = false;
 
-  const controller = options[CONTROLLER];
+  const controller = options.controller;
   const renderContext: RenderContext<Props> = {
     dispatcher,
     options,
@@ -127,32 +93,41 @@ export function createVNode(options: Partial<Options>, node: VNode): DOMNativeVN
     set previousProps(value) {
       previousProps = value;
     },
-    errorBoundarySymbol: ERROR_BOUNDARY,
     rendering: undefined,
-    parent: options[PARENT],
-    controller: options[CONTROLLER],
+    parent: options.parent,
+    controller: options.controller,
     currentProps: undefined,
     continueFlag: undefined,
     get currentState() {
       return dispatcher.state;
-    },
-    contextSymbol: CONTEXT,
-    parentSymbol: PARENT
+    }
   };
-  controller?.hello?.(renderContext);
-  return Native(
-  {},
-  {
-    reference: Fragment,
-    children: {
-      async *[Symbol.asyncIterator]() {
-        if (isDestroyable || destroyed) {
-          return;
+  let latestChildren: DOMNativeVNode[] | undefined = undefined;
+  const native = Native(
+    {},
+    {
+      reference: Fragment,
+      children: {
+        async *[Symbol.asyncIterator]() {
+          if (isDestroyable || destroyed) {
+            return;
+          }
+          let yielded = false;
+          for await (const nextChildren of renderGenerator(renderContext)) {
+            console.log({ nextChildren, latestChildren });
+            latestChildren = nextChildren;
+            yield nextChildren;
+            yielded = true;
+          }
+          if (!yielded && latestChildren) {
+            yield latestChildren;
+          }
         }
-        yield *renderGenerator(renderContext);
       }
     }
-  });
+  );
+  controller?.hello?.(renderContext, native);
+  return native;
 
   async function actuallyDestroy() {
     isDestroyable = true;

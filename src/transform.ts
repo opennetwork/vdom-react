@@ -7,7 +7,7 @@ import {
 import { Fragment, isSourceReference, VNode } from "@opennetwork/vnode";
 import { createRef, Fragment as ReactFragment, ReactElement } from "react";
 import type { DOMNativeVNode, NativeOptionsVNode } from "@opennetwork/vdom";
-import type { ContextSymbol, createVNode, Options } from "./node";
+import type { createVNode, Options } from "./node";
 import { Native as DOMNative } from "@opennetwork/vdom";
 import { Native } from "./native-node";
 
@@ -15,7 +15,6 @@ export interface TransformContext {
   options: Partial<Options>;
   updateQueue: DeferredActionCollector;
   element: unknown;
-  contextSymbol: ContextSymbol;
   createVNode: typeof createVNode;
 }
 
@@ -30,7 +29,7 @@ export function initialTransform(context: TransformContext): VNode {
     updateQueue,
     createVNode,
     options: {
-      [context.contextSymbol]: contextMap
+      contextMap
     }
   } = context;
   if (isReactContextConsumerElement(element)) {
@@ -58,7 +57,7 @@ export function initialTransform(context: TransformContext): VNode {
         ...context,
         options: {
           ...context.options,
-          [context.contextSymbol]: nextContextMap
+          contextMap: nextContextMap
         }
       })
     };

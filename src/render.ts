@@ -9,7 +9,7 @@ import { DeferredAction, DeferredActionIterator } from "./queue";
 import { isPromise } from "iterable";
 import { ComponentInstanceMap, renderComponent } from "./component";
 import { renderFunction } from "./function";
-import type { Options, createVNode, ContextSymbol, ParentSymbol, ErrorBoundarySymbol } from "./node";
+import type { Options, createVNode } from "./node";
 import type { Dispatcher } from "./dispatcher";
 import type { State } from "./state";
 import { DOMNativeVNode, Native } from "@opennetwork/vdom";
@@ -25,9 +25,6 @@ export interface RenderContext<P = unknown> {
   controller?: Controller;
   rendering: Promise<void>;
   createVNode: typeof createVNode;
-  contextSymbol: ContextSymbol;
-  parentSymbol: ParentSymbol;
-  errorBoundarySymbol: ErrorBoundarySymbol;
   continueFlag?: () => boolean;
   readonly isDestroyable: boolean;
   readonly destroyed: boolean;
@@ -73,7 +70,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
 
     if (renderedState.symbol !== renderingState.symbol) {
       try {
-        if (!await controller?.beforeRender?.(context, renderMeta)) break;
+        if (!(await controller?.beforeRender?.(context, renderMeta) ?? true)) break;
         let renderResult;
         renderDeferred = deferred();
         context.rendering = renderDeferred.promise;
@@ -113,10 +110,9 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
             transform({
               updateQueue: dispatcher.updateQueue,
               createVNode: context.createVNode,
-              contextSymbol: context.contextSymbol,
               options: {
                 ...childrenOptions,
-                [context.parentSymbol]: context
+                parent: context
               },
               element: latestValue
             })
@@ -134,7 +130,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
       // This should be only done when we have rendered
       await dispatcher.commitHookEffectList(0);
     }
-    willContinue = (context.continueFlag?.() ?? true);
+    willContinue = (await controller?.willContinue?.(context, renderMeta) ?? false);
     if (dispatcher.hooked && (willContinue || parent)) {
       if (!(await waitForUpdates(!willContinue))) {
         break;
@@ -199,7 +195,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
         knownPromiseErrors.add(error);
       }
       return false;
-    } else if (await options[context.errorBoundarySymbol](error)) {
+    } else if (await options.errorBoundary(error)) {
       // If the error boundary returned true, the error should be thrown later on
       caughtError = error;
       await updateQueueIterator.return?.();

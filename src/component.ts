@@ -37,7 +37,7 @@ export async function renderComponent<P>(context: RenderContext<P>, source: Reac
 
   const errorBoundary = useErrorBoundary(context, currentInstance, source);
   if (isReactErrorBoundaryInstance(currentInstance) || source.getDerivedStateFromError) {
-    childrenOptions[context.errorBoundarySymbol] = errorBoundary;
+    childrenOptions.errorBoundary = errorBoundary;
   }
 
   return [renderResult, childrenOptions];
