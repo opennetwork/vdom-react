@@ -5,13 +5,15 @@ import { Fragment, hydrate, Tree } from "@opennetwork/vnode";
 import { Collector } from "microtask-collector";
 import { ReactDOMVContext } from "./context";
 import { RenderContext } from "./render";
+import { DeferredAction, DeferredActionCollector, DeferredActionIterator, DeferredActionIteratorResult } from "./queue";
+import { noop } from "./noop";
 
 export type {
   DOMNativeVNode,
   ReactDOMVContext
 };
 
-const contexts = new WeakMap<Element, DOMVContext>();
+const contexts = new WeakMap<Element, ReactDOMVContext>();
 const roots = new WeakMap<DOMVContext, RenderContext>();
 const children = new WeakMap<RenderContext, Set<RenderContext>>();
 const nodes = new WeakMap<RenderContext, DOMNativeVNode>();
@@ -37,10 +39,11 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   const collector = new Collector({
     eagerCollection: true
   });
-  const context = new ReactDOMVContext({
+  const context = contexts.get(root) ?? new ReactDOMVContext({
     root,
     promise
   });
+  contexts.set(root, context);
   let rootRenderContext = roots.get(context);
 
   // We will operate on the assumptions that all nodes right now should just process one render
@@ -66,51 +69,51 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   const promises = new Set<Promise<unknown>>();
   const accumulativePromise = wait();
 
-  const node = createVNodeFromElement(element);
+  const initialNativeNode = createVNodeFromElement(element);
 
   if (!rootRenderContext) {
     await Promise.reject(new Error("Expected root render context"));
   }
 
-  let rootQueue: [DOMNativeVNode, RenderContextTree][] = [
+  const rootQueue: [DOMNativeVNode, RenderContextTree][] = [
     [
-      node,
+      initialNativeNode,
       buildTree(rootRenderContext)
     ]
   ];
 
   let rootNativeNode: DOMNativeVNode | undefined;
   let tree: RenderContextTree | undefined;
+  const knownQueues = new Map<RenderContext, DeferredActionIterator>();
+  const queuePromises = new WeakMap<DeferredActionIterator, Promise<[RenderContext, DeferredActionIterator, DeferredActionIteratorResult]>>();
+  let processQueuesPromise: Promise<void> | undefined = undefined;
+
   try {
     // Hydrate at least once no matter what
     do {
-      [rootNativeNode, tree] = await getNextRoot();
-      if (!rootNativeNode) {
-        break;
-      }
+      [rootNativeNode] = rootQueue.shift();
 
-      await hydrate(context, rootNativeNode, tree);
+      await hydrate(context, rootNativeNode);
 
       await options.rendered?.({
         remainingRootsToFlush: rootQueue.length
       });
 
-      if (rootQueue.length) {
-        continue; // Allow the current queue to flush
-      }
-
       tree = buildTree(rootRenderContext);
 
-      await waitForTreeChange(tree);
+      setQueues(tree, knownQueues);
 
-      const changes = getChanges(tree);
-
-      if (!changes.length) {
-        await Promise.reject(new Error("Expected at least one change since waitForTreeChange, rollback isn't yet implemented?"));
+      if (knownQueues.size && !processQueuesPromise) {
+        promise(processQueuesPromise = processQueues());
       }
 
-      rootQueue = changes.map((tree): [DOMNativeVNode, RenderContextTree] => [nodes.get(tree.context), tree]).filter(Boolean);
-    } while (!isComplete(tree));
+      const nextTree = getChanges(tree)[0] ?? await waitForTreeChange(tree);
+
+      rootQueue.push([
+        nodes.get(nextTree.context),
+        nextTree
+      ]);
+    } while (rootQueue.length);
   } catch (error) {
     console.error(error);
     throw error;
@@ -129,15 +132,68 @@ export async function renderAsync(element: ReactElement, root: Element, options:
       return [tree];
     } else {
       return tree.childrenTrees.reduce<RenderContextTree[]>(
-        (changes, tree) => changes.concat(getChanges(tree)),
+        (changes, child) => changes.concat(getChanges(child)),
         []
       );
     }
   }
 
-  function waitForTreeChange(tree: RenderContextTree): Promise<void> {
-    return Promise.any([
-      tree.context.dispatcher.state.promise,
+  function setQueues(tree: RenderContextTree, queues: Map<RenderContext, DeferredActionIterator>) {
+    queues.set(tree.context, tree.context.updateQueueIterator);
+    for (const child of tree.childrenTrees) {
+      setQueues(child, queues);
+    }
+  }
+
+  async function processQueues() {
+    try {
+      do {
+        const [context, iterator, result] = await Promise.any(
+          [...knownQueues.entries()]
+            .map(async ([context, iterator]): Promise<[RenderContext, DeferredActionIterator, DeferredActionIteratorResult]> => {
+              const current = queuePromises.get(iterator);
+              if (current) {
+                return current;
+              }
+              const promise = iterator.next()
+                .then((result): [RenderContext, DeferredActionIterator, DeferredActionIteratorResult] => [
+                  context,
+                  iterator,
+                  result
+                ]);
+              promise.catch(noop);
+              queuePromises.set(
+                iterator,
+                promise
+              );
+              return promise;
+            })
+        );
+        queuePromises.delete(iterator);
+        if (result.done) {
+          knownQueues.delete(context);
+        } else if (isDeferredActionArray(result)) {
+          promise(
+            Promise.all(
+              result.value.map(async (action) => {
+                await action();
+              })
+            )
+          );
+        }
+      } while (knownQueues.size);
+    } finally {
+      processQueuesPromise = undefined;
+    }
+
+    function isDeferredActionArray(result: DeferredActionIteratorResult): result is { value: DeferredAction[] } {
+      return Array.isArray(result.value);
+    }
+  }
+
+  function waitForTreeChange(tree: RenderContextTree): Promise<RenderContextTree> {
+    return Promise.any<RenderContextTree>([
+      tree.context.dispatcher.state.promise.then(() => tree),
       ...tree.childrenTrees.map(waitForTreeChange)
     ]);
   }
@@ -156,17 +212,8 @@ export async function renderAsync(element: ReactElement, root: Element, options:
     }
   }
 
-  async function getNextRoot(): Promise<[DOMNativeVNode, RenderContextTree] | undefined> {
-    return rootQueue.shift();
-  }
-
   function createVNodeFromElement(element: ReactElement) {
     return createVNode({ controller: context }, { reference: Fragment, source: element, options: {} });
-  }
-
-  function isComplete(tree: RenderContextTree) {
-    // By default in prod we will only rely on isDestroyable
-    return tree.context.isDestroyable || true;
   }
 
   async function wait() {

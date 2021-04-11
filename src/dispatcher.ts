@@ -30,20 +30,21 @@ export interface ReactContextDescriptor<T = unknown> {
   currentValue: T;
 }
 
-export interface ReactDispatcherContext {
+export interface DispatcherContext {
   readonly updateQueue?: DeferredActionCollector;
   readonly contextMap?: Map<unknown, ReactContextDescriptor>;
 }
 
-export interface Dispatcher extends ReactDispatcher, WorkInProgressContext, ReactDispatcherContext {
+export interface Dispatcher extends ReactDispatcher, WorkInProgressContext, DispatcherContext {
   readonly state: State;
+  readonly updateQueue: DeferredActionCollector;
   componentUpdateQueue?: FunctionComponentUpdateQueue;
   commitHookEffectList(tag: number): Promise<void>;
   destroyHookEffectList(tag: number): Promise<void>;
   beforeRender(): void;
 }
 
-export function createReactDispatcher(context: ReactDispatcherContext) {
+export function createReactDispatcher(context: DispatcherContext) {
   let componentUpdateQueue: FunctionComponentUpdateQueue | undefined = undefined;
   const state = createState();
   const dispatcher: Dispatcher = {
@@ -108,7 +109,7 @@ export function createReactDispatcher(context: ReactDispatcherContext) {
   }
 
   function useMemo<T>(nextCreate: () => T, deps?: unknown[]): T {
-    const hook = useWorkInProgress<[T, unknown[]]>(dispatcher, this);
+    const hook = useWorkInProgress<[T, unknown[]]>(dispatcher);
     if (hook.memoizedState && deps && areHookInputsEqual(deps, hook.memoizedState[1])) {
       return hook.memoizedState[0];
     }
@@ -124,7 +125,7 @@ export function createReactDispatcher(context: ReactDispatcherContext) {
   function useRef<T>(initialValue: T|null): RefObject<T>;
   function useRef<T = undefined>(): MutableRefObject<T | undefined>;
   function useRef<T>(initial?: T): MutableRefObject<T> {
-    const hook = useWorkInProgress<MutableRefObject<T>>(dispatcher, this);
+    const hook = useWorkInProgress<MutableRefObject<T>>(dispatcher);
     if (!hook.memoizedState) {
       hook.memoizedState = {
         current: initial
@@ -134,7 +135,7 @@ export function createReactDispatcher(context: ReactDispatcherContext) {
   }
 
   function useCallback<T extends (...args: unknown[]) => unknown>(nextCallback: T, deps?: unknown[]): T {
-    const hook = useWorkInProgress<[T, unknown[]]>(dispatcher, this);
+    const hook = useWorkInProgress<[T, unknown[]]>(dispatcher);
     if (hook.memoizedState && deps && areHookInputsEqual(deps, hook.memoizedState[1])) {
       return hook.memoizedState[0];
     }
@@ -146,7 +147,7 @@ export function createReactDispatcher(context: ReactDispatcherContext) {
   }
 
   function useEffect(create: EffectCallback, deps?: unknown[]): void {
-    const hook = useWorkInProgress<WorkInProgressHookEffect>(dispatcher, this);
+    const hook = useWorkInProgress<WorkInProgressHookEffect>(dispatcher);
     if (hook.memoizedState && deps && areHookInputsEqual(deps, hook.memoizedState.deps)) {
       return;
     }
@@ -156,7 +157,7 @@ export function createReactDispatcher(context: ReactDispatcherContext) {
   function useState<S>(initialState: S | (() => S)): [S, Dispatch<SetStateAction<S>>];
   function useState<S = undefined>(): [S | undefined, Dispatch<SetStateAction<S | undefined>>];
   function useState<S>(initialState?: (() => S) | S): [S, Dispatch<SetStateAction<S>>] {
-    const hook = useWorkInProgress<S, WorkInProgressHookQueue<S, SetStateAction<S>>>(dispatcher, this);
+    const hook = useWorkInProgress<S, WorkInProgressHookQueue<S, SetStateAction<S>>>(dispatcher);
     if (!hook.queue) {
       const state = hook.baseState = hook.memoizedState = isStateFn(initialState) ? initialState() : initialState;
       hook.queue = {
@@ -206,7 +207,7 @@ export function createReactDispatcher(context: ReactDispatcherContext) {
     type S = ReducerState<R>;
     type A = ReducerAction<R>;
     assertReducer(reducer);
-    const hook = useWorkInProgress<S, WorkInProgressHookQueue<S, A>>(dispatcher, this);
+    const hook = useWorkInProgress<S, WorkInProgressHookQueue<S, A>>(dispatcher);
     if (!hook.queue) {
       const initialState = getInitialState();
       hook.queue = {
@@ -252,7 +253,7 @@ export function createReactDispatcher(context: ReactDispatcherContext) {
     hook: WorkInProgressHook<S, WorkInProgressHookQueue<S, A>>,
     action: A
   ) {
-    context.updateQueue.add(() => {
+    dispatcher.updateQueue.add(() => {
       const currentState = hook.memoizedState;
       const nextState = hook.queue.lastRenderedReducer(currentState, action);
       if (Object.is(nextState, currentState)) {
