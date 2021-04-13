@@ -7,6 +7,7 @@ import { ReactDOMVContext } from "./context";
 import { RenderContext } from "./render";
 import { DeferredAction, DeferredActionCollector, DeferredActionIterator, DeferredActionIteratorResult } from "./queue";
 import { noop } from "./noop";
+import { NeverEndingPromise, State, StateContainer } from "./state";
 
 export type {
   DOMNativeVNode,
@@ -17,10 +18,12 @@ const contexts = new WeakMap<Element, ReactDOMVContext>();
 const roots = new WeakMap<DOMVContext, RenderContext>();
 const children = new WeakMap<RenderContext, Set<RenderContext>>();
 const nodes = new WeakMap<RenderContext, DOMNativeVNode>();
+const states = new WeakMap<State, RenderContext>();
 
-interface RenderContextTree extends Tree {
+interface RenderContextTree {
   context: RenderContext;
-  childrenTrees: RenderContextTree[];
+  node?: DOMNativeVNode;
+  children: RenderContextTree[];
 }
 
 interface RenderDetails {
@@ -29,6 +32,10 @@ interface RenderDetails {
 
 interface RenderOptions {
   rendered?(details: RenderDetails): Promise<void>;
+  collector?: Collector<DeferredAction>;
+  stateChanges?: Collector<State>;
+  context?: ReactDOMVContext;
+  maxIterations?: number;
 }
 
 export function render(node: ReactElement, root: Element, options: RenderOptions = {}): unknown {
@@ -36,12 +43,17 @@ export function render(node: ReactElement, root: Element, options: RenderOptions
 }
 
 export async function renderAsync(element: ReactElement, root: Element, options: RenderOptions = {}): Promise<[DOMNativeVNode, ReactDOMVContext]> {
-  const collector = new Collector({
+  const collector = options.collector ?? new Collector<DeferredAction>({
     eagerCollection: true
   });
-  const context = contexts.get(root) ?? new ReactDOMVContext({
+  const stateChanges = options.stateChanges ?? new Collector<State>({
+    eagerCollection: true
+  });
+  const stateChangeIterator = stateChanges[Symbol.asyncIterator]();
+
+  const context = options.context ?? contexts.get(root) ?? new ReactDOMVContext({
     root,
-    promise
+    promise: unknownPromise
   });
   contexts.set(root, context);
   let rootRenderContext = roots.get(context);
@@ -53,6 +65,7 @@ export async function renderAsync(element: ReactElement, root: Element, options:
 
   context.hello = (renderContext: RenderContext, node: DOMNativeVNode) => {
     nodes.set(renderContext, node);
+    states.set(renderContext.currentState, renderContext);
     if (!renderContext.parent) {
       roots.set(context, renderContext);
       rootRenderContext = renderContext;
@@ -66,8 +79,9 @@ export async function renderAsync(element: ReactElement, root: Element, options:
 
   contexts.set(root, context);
 
+  let caughtError: unknown = undefined;
   const promises = new Set<Promise<unknown>>();
-  const accumulativePromise = wait();
+  let accumulativePromise: Promise<void> | undefined = wait(collector);
 
   const initialNativeNode = createVNodeFromElement(element);
 
@@ -84,13 +98,16 @@ export async function renderAsync(element: ReactElement, root: Element, options:
 
   let rootNativeNode: DOMNativeVNode | undefined;
   let tree: RenderContextTree | undefined;
-  const knownQueues = new Map<RenderContext, DeferredActionIterator>();
-  const queuePromises = new WeakMap<DeferredActionIterator, Promise<[RenderContext, DeferredActionIterator, DeferredActionIteratorResult]>>();
-  let processQueuesPromise: Promise<void> | undefined = undefined;
+
+  let remainingIterations = options.maxIterations;
 
   try {
     // Hydrate at least once no matter what
     do {
+      if (remainingIterations) {
+        remainingIterations -= 1;
+      }
+
       [rootNativeNode] = rootQueue.shift();
 
       await hydrate(context, rootNativeNode);
@@ -101,27 +118,25 @@ export async function renderAsync(element: ReactElement, root: Element, options:
 
       tree = buildTree(rootRenderContext);
 
-      if (!anyHooked(tree)) {
+      if (!anyHooked(tree) || remainingIterations === 0) {
+        // const state = { previousState: tree.children[0].context.previousState, currentState: tree.children[0].context.currentState };
+        // console.log("None hooked", tree.children[0], state);
         break;
       }
 
-      setQueues(tree, knownQueues);
+      const { done, value } = await stateChangeIterator.next();
 
-      if (knownQueues.size && !processQueuesPromise) {
-        promise(processQueuesPromise = processQueues());
-      }
+      console.log({ done, value: value.map((value: StateContainer) => value.symbol), context: value.map((value: State) => states.get(value)) });
 
-
-      const nextTree = await waitForTreeChange(tree);
+      if (done) break;
 
       rootQueue.push([
-        nodes.get(nextTree.context),
-        nextTree
+        rootNativeNode,
+        tree
       ]);
-    } while (rootQueue.length);
+    } while (rootQueue.length && !caughtError && (typeof remainingIterations !== "number" || remainingIterations > 0));
   } catch (error) {
-    console.error(error);
-    throw error;
+    caughtError = caughtError ?? error;
   } finally {
     collector.close();
     await context.close();
@@ -129,116 +144,92 @@ export async function renderAsync(element: ReactElement, root: Element, options:
     await Promise.all(promises);
   }
 
+  if (caughtError) {
+    throw caughtError;
+  }
+
   return [rootNativeNode, context];
 
   function anyHooked(tree: RenderContextTree): boolean {
     return (
       tree.context.dispatcher.hooked ||
-      tree.childrenTrees.findIndex(anyHooked) > -1
+      tree.children.findIndex(anyHooked) > -1
     );
-  }
-
-  function getChanges(tree: RenderContextTree): RenderContextTree[] {
-    const { context } = tree;
-    if (context.currentState.symbol !== context.previousState.symbol) {
-      return [tree];
-    } else {
-      return tree.childrenTrees.reduce<RenderContextTree[]>(
-        (changes, child) => changes.concat(getChanges(child)),
-        []
-      );
-    }
   }
 
   function setQueues(tree: RenderContextTree, queues: Map<RenderContext, DeferredActionIterator>) {
     queues.set(tree.context, tree.context.updateQueueIterator);
-    for (const child of tree.childrenTrees) {
+    for (const child of tree.children) {
       setQueues(child, queues);
     }
-  }
-
-  async function processQueues() {
-    try {
-      do {
-        const [context, iterator, result] = await Promise.any(
-          [...knownQueues.entries()]
-            .map(async ([context, iterator]): Promise<[RenderContext, DeferredActionIterator, DeferredActionIteratorResult]> => {
-              const current = queuePromises.get(iterator);
-              if (current) {
-                return current;
-              }
-              const promise = iterator.next()
-                .then((result): [RenderContext, DeferredActionIterator, DeferredActionIteratorResult] => [
-                  context,
-                  iterator,
-                  result
-                ]);
-              promise.catch(noop);
-              queuePromises.set(
-                iterator,
-                promise
-              );
-              return promise;
-            })
-        );
-        queuePromises.delete(iterator);
-        if (result.done) {
-          knownQueues.delete(context);
-        } else if (isDeferredActionArray(result)) {
-          promise(
-            Promise.all(
-              result.value.map(async (action) => {
-                await action();
-              })
-            )
-          );
-        }
-      } while (knownQueues.size);
-    } finally {
-      processQueuesPromise = undefined;
-    }
-
-    function isDeferredActionArray(result: DeferredActionIteratorResult): result is { value: DeferredAction[] } {
-      return Array.isArray(result.value);
-    }
-  }
-
-  function waitForTreeChange(tree: RenderContextTree): Promise<RenderContextTree> {
-    return Promise.any<RenderContextTree>([
-      tree.context.dispatcher.state.promise.then(() => tree),
-      ...tree.childrenTrees.map(waitForTreeChange)
-    ]);
   }
 
   function buildTree(context: RenderContext): RenderContextTree {
     const childrenArray = [...(children.get(context) ?? [])];
     return {
       context,
-      reference: reference(context),
-      children: Object.freeze(childrenArray.map(reference)),
-      childrenTrees: childrenArray.map(buildTree)
+      node: nodes.get(context),
+      children: childrenArray.map(buildTree)
     };
-
-    function reference(context: RenderContext) {
-      return nodes.get(context)?.reference ?? Symbol("Unknown context node");
-    }
   }
 
   function createVNodeFromElement(element: ReactElement) {
-    return createVNode({ controller: context }, { reference: Fragment, source: element, options: {} });
+    return createVNode(
+      {
+        controller: context,
+        updateQueue: collector,
+        stateChanges,
+        contextMap: new Map(),
+        errorBoundary: onAnyError
+      },
+      { reference: Fragment, source: element, options: {} }
+    );
   }
 
-  async function wait() {
-    for await (const promises of collector) {
-      await Promise.all(promises);
+  async function wait(queue: DeferredActionCollector) {
+    try {
+      const iterator = queue[Symbol.asyncIterator]();
+      let result: DeferredActionIteratorResult;
+      do {
+        result = await iterator.next();
+        if (!result.done && Array.isArray(result.value)) {
+          result.value.forEach(onDeferredAction);
+        }
+      } while (!result.done && !caughtError);
+    } catch (error) {
+      caughtError = caughtError ?? error;
+    } finally {
+      accumulativePromise = undefined;
     }
   }
 
-  function promise(promise: Promise<unknown>) {
-    collector.add(promise);
+  function onDeferredAction(action: DeferredAction) {
+    knownPromise(runDeferredAction());
+
+    async function runDeferredAction() {
+      if (typeof action === "function") {
+        await action();
+      }
+    }
+  }
+
+  function unknownPromise(promise: Promise<unknown>) {
+    collector.add(() => promise);
+  }
+
+  function onAnyError(error: unknown) {
+    caughtError = error;
+    return true;
+  }
+
+  function knownPromise(promise: Promise<unknown>) {
     promises.add(promise);
-    promise.then(remove, remove);
-    function remove() {
+    promise.then(onResolve, onError);
+    function onError(error: unknown) {
+      promises.delete(promise);
+      onAnyError(error);
+    }
+    function onResolve() {
       promises.delete(promise);
     }
   }

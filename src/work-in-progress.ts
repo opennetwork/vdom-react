@@ -1,4 +1,4 @@
-import { WorkInProgressHook } from "react-reconciler";
+import type { WorkInProgressHook } from "react-reconciler";
 
 export interface WorkInProgressContext {
   hookIndex: number;

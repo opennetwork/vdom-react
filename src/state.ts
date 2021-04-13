@@ -1,17 +1,25 @@
 import { deferred } from "./deferred";
+import { Collector } from "microtask-collector";
 
-export interface State<Value = void> {
-  readonly promise: Promise<void>;
+export interface StateContainer<Value = void> {
   readonly symbol: symbol;
   readonly value: Value;
-  change(value: Value): void;
 }
 
-export function createState<Value = void>(initialValue: Value = undefined): State<Value> {
-  let defer = deferred();
-  let symbol = Symbol();
+// Wrap the result as a tuple so that it isn't resolved automatically
+export type NeverEndingPromise = Promise<[NeverEndingPromise]>;
+
+export interface State<Value = void> extends StateContainer<Value>, AsyncIterable<symbol> {
+  readonly promise: NeverEndingPromise;
+  change(value: Value): void;
+}
+let globalStateIndex = -1;
+
+export function createState<Value = void>(initialValue: Value = undefined, stateChanges?: Collector<State<Value>>): State<Value> {
+  let defer = deferred<[NeverEndingPromise]>();
+  let symbol = Symbol(globalStateIndex);
   let value = initialValue;
-  return {
+  const state = {
     get promise() {
       return defer.promise;
     },
@@ -23,9 +31,23 @@ export function createState<Value = void>(initialValue: Value = undefined): Stat
     },
     change(nextValue: Value) {
       value = nextValue;
-      symbol = Symbol();
-      defer.resolve();
-      defer = deferred();
+      symbol = Symbol(globalStateIndex += 1);
+      const nextDefer = deferred<[NeverEndingPromise]>();
+      defer.resolve([nextDefer.promise]);
+      defer = nextDefer;
+      stateChanges?.add(state);
+    },
+    async *[Symbol.asyncIterator]() {
+      let yielded;
+      let nextPromise: NeverEndingPromise;
+      do {
+        if (symbol !== yielded) {
+          yielded = symbol;
+          yield symbol;
+        }
+        [nextPromise] = await defer.promise;
+      } while (true);
     }
   };
+  return state;
 }

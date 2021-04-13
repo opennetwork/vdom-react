@@ -1,4 +1,4 @@
-import { SharedInternals } from "react-reconciler";
+import type { SharedInternals } from "react-reconciler";
 import {
   Component as ReactComponent,
   ComponentClass as ReactComponentClass,

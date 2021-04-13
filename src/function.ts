@@ -1,6 +1,6 @@
 import * as NoNo from "react";
 import { assertSharedInternalsPresent } from "./type-guards";
-import { ReactDispatcher } from "react-reconciler";
+import type { ReactDispatcher } from "react-reconciler";
 
 assertSharedInternalsPresent(NoNo);
 const { __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED: SharedInternals } = NoNo;

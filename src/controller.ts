@@ -1,12 +1,12 @@
 import type { AbortSignal } from "./cancellable";
-import type { State } from "./state";
+import type { StateContainer } from "./state";
 import type { RenderContext } from "./render";
 import type { DOMNativeVNode } from "@opennetwork/vdom";
 
 export interface RenderMeta {
-  currentState: State;
+  currentState: StateContainer;
   currentProps: unknown;
-  previousState: State;
+  previousState: StateContainer;
   previousProps: unknown;
   onError(error: unknown): Promise<boolean> | boolean;
   parent?: RenderContext;

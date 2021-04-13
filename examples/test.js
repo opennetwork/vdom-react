@@ -12,7 +12,7 @@ import {
   useContext,
   Fragment as ReactFragment,
   Component as ReactComponent,
-  forwardRef
+  forwardRef, Fragment
 } from "react";
 
 const Context = createContext(0);
@@ -65,7 +65,10 @@ function A() {
   const promise = useMemo(async () => {
     await new Promise(resolve => setTimeout(resolve, 1500));
     setIsLoaded(true);
+    console.log("Promise finished");
   }, [setIsLoaded]);
+
+  console.log({ state, isLoaded, promise });
 
   if (!isLoaded) throw promise;
 
@@ -125,21 +128,9 @@ function Component() {
 
   const ref = useRef();
 
-  // console.log(useMemo(() => index += 1, [index]));
-  // console.log(useCallback(() => index, [])())
-  // console.log(useEffect(() => {
-  //   console.log("to to")
-  // }, [index]))
-
-  useEffect(() => {
-    console.log({ ref2: ref });
-  });
-
   return createElement(
     A,
-    {
-      ref: undefined
-    },
+    {  }
   );
 }
 

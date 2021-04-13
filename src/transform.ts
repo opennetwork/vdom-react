@@ -12,7 +12,7 @@ import { Native as DOMNative } from "@opennetwork/vdom";
 import { Native } from "./native-node";
 
 export interface TransformContext {
-  options: Partial<Options>;
+  options: Options;
   updateQueue: DeferredActionCollector;
   element: unknown;
   createVNode: typeof createVNode;
@@ -68,7 +68,7 @@ export function initialTransform(context: TransformContext): VNode {
     }
     const { render: source } = type;
     const render = source.bind(undefined, props, ref || createRef());
-    return createVNode({}, { reference: Fragment, source: render, options: props || {} });
+    return createVNode(context.options, { reference: Fragment, source: render, options: props || {} });
   } else if (isReactElement(element)) {
     const { type, props, ref, key }: ReactElement & { ref?: unknown } = element;
     if (type === ReactFragment) {

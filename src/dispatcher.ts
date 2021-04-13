@@ -13,7 +13,7 @@ import {
   SetStateAction
 } from "react";
 import { createWorkInProgressContext, useWorkInProgress, WorkInProgressContext } from "./work-in-progress";
-import {
+import type {
   Destructor,
   FunctionComponentUpdateQueue, ReactDispatcher,
   WorkInProgressHook,
@@ -33,6 +33,7 @@ export interface ReactContextDescriptor<T = unknown> {
 export interface DispatcherContext {
   readonly updateQueue?: DeferredActionCollector;
   readonly contextMap?: Map<unknown, ReactContextDescriptor>;
+  readonly stateChanges: Collector<State>;
 }
 
 export interface Dispatcher extends ReactDispatcher, WorkInProgressContext, DispatcherContext {
@@ -46,7 +47,7 @@ export interface Dispatcher extends ReactDispatcher, WorkInProgressContext, Disp
 
 export function createReactDispatcher(context: DispatcherContext) {
   let componentUpdateQueue: FunctionComponentUpdateQueue | undefined = undefined;
-  const state = createState();
+  const state = createState<void>(undefined, context.stateChanges);
   const dispatcher: Dispatcher = {
     ...createWorkInProgressContext(),
     ...context,
@@ -256,6 +257,7 @@ export function createReactDispatcher(context: DispatcherContext) {
     dispatcher.updateQueue.add(() => {
       const currentState = hook.memoizedState;
       const nextState = hook.queue.lastRenderedReducer(currentState, action);
+      console.log({ currentState, nextState, q: hook.queue.lastRenderedReducer, action, is: Object.is(nextState, currentState) });
       if (Object.is(nextState, currentState)) {
         return;
       }
