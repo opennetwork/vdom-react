@@ -1,5 +1,5 @@
 import { renderAsync } from "../index";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { screen } from "@testing-library/dom";
 import userEvent from "@testing-library/user-event";
 
@@ -44,5 +44,49 @@ describe("Basic", function () {
         const p = screen.getByTestId("paragraph");
         expect(p.innerHTML).toEqual("Clicked!");
 
+    });
+
+    it("allows interval to set state", async () => {
+
+        const values = Array.from({ length: 3 + Math.floor(Math.random() * 20) }, () => `${Math.random()}`);
+        const lastValue = values[values.length - 1];
+        function Component() {
+            const [state, setState] = useState<string>("Default");
+            useEffect(() => {
+               const interval = setInterval(
+                   function () {
+                       const next = values.shift();
+                       if (next) {
+                           setState(next);
+                       }
+                       if (!values.length) {
+                           clearInterval(interval);
+                       }
+                   },
+                    10
+               );
+               return () => {
+                   clearInterval(interval);
+               };
+            });
+            return <p data-testid="paragraph">{state}</p>;
+        }
+
+        const rendered = jest.fn();
+
+        const maxIterations = values.length + 1;
+
+        await renderAsync(
+            <Component />,
+            document.body,
+            {
+                rendered,
+                maxIterations
+            }
+        );
+
+        const p = screen.getByTestId("paragraph");
+        expect(p.innerHTML).toEqual(lastValue);
+        expect(rendered.mock.calls.length).toEqual(maxIterations);
     });
 });
