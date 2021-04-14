@@ -1166,10 +1166,10 @@
   resolved "https://registry.npmjs.org/@opennetwork/vnode-hooks/-/vnode-hooks-6.0.0.tgz#6c49801ab4f992fe89637aebba6fbd0d5190439f"
   integrity sha512-f293RTv4/nGD5bl/SLFMtOfxQDC4NvA2Xmk06GEHNHndPPP89/Q0aNBpzeUADSr6VeIp8IbkaebzRS3mU6elBg==
 
-"@opennetwork/vnode@^21.1.0":
-  version "21.1.0"
-  resolved "https://registry.npmjs.org/@opennetwork/vnode/-/vnode-21.1.0.tgz#dd0432ca9d498ac50e956514517a9c8b421b0262"
-  integrity sha512-dub5LNOYYMmdyKkwFJL4blEltRU/GQIrReX5xTp4JVLn0ZXLYZyizxuAVay2ElOup+Ul7asLAmvTV3VhG9xoag==
+"@opennetwork/vnode@^21.2.0":
+  version "21.2.0"
+  resolved "https://registry.npmjs.org/@opennetwork/vnode/-/vnode-21.2.0.tgz#aa0891d70911f02d361d40dd446dc5416f981081"
+  integrity sha512-qf4kG0qwX8gqrYIi+bdhtj5uRyU9kz4Q9HNJAKLhDV/lT0Mtu4liqPq6Aam6Q0WafzX2FBxC7d8jJqjg/5EIPg==
 
 "@sinonjs/commons@^1.7.0":
   version "1.8.3"

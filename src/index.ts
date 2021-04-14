@@ -59,28 +59,6 @@ export async function renderAsync(element: ReactElement, root: Element, options:
     root
   });
   contexts.set(root, context);
-  let rootRenderContext = roots.get(context);
-
-  // We will operate on the assumptions that all nodes right now should just process one render
-  // for a cycle, we can change this in the future for root nodes of active elements, but that's
-  // not a concern for now
-  context.willContinue = () => false;
-
-  context.hello = (renderContext: RenderContext, node: DOMNativeVNode) => {
-    nodes.set(renderContext, node);
-    states.set(renderContext.currentState, renderContext);
-    if (!renderContext.parent) {
-      roots.set(context, renderContext);
-      rootRenderContext = renderContext;
-      return;
-    }
-    const { parent } = renderContext;
-    const parentChildren = children.get(parent) ?? new Set<RenderContext>();
-    children.set(parent, parentChildren);
-    parentChildren.add(renderContext);
-  };
-
-  contexts.set(root, context);
 
   let caughtError: unknown = undefined;
   const promises = new Set<Promise<unknown>>();
@@ -88,15 +66,8 @@ export async function renderAsync(element: ReactElement, root: Element, options:
 
   const initialNativeNode = createVNodeFromElement(element);
 
-  if (!rootRenderContext) {
-    await Promise.reject(new Error("Expected root render context"));
-  }
-
-  const rootQueue: [DOMNativeVNode, RenderContextTree][] = [
-    [
-      initialNativeNode,
-      buildTree(rootRenderContext)
-    ]
+  const rootQueue: DOMNativeVNode[] = [
+    initialNativeNode
   ];
 
   let rootNativeNode: DOMNativeVNode | undefined;
@@ -111,7 +82,7 @@ export async function renderAsync(element: ReactElement, root: Element, options:
         remainingIterations -= 1;
       }
 
-      [rootNativeNode] = rootQueue.shift();
+      rootNativeNode = rootQueue.shift();
 
       await hydrate(context, rootNativeNode);
 
@@ -119,9 +90,9 @@ export async function renderAsync(element: ReactElement, root: Element, options:
         remainingRootsToFlush: rootQueue.length
       });
 
-      tree = buildTree(rootRenderContext);
+      tree = buildTree(context);
 
-      if (!anyHooked(tree) || remainingIterations === 0) {
+      if (!anyHooked(context) || remainingIterations === 0) {
         // const state = { previousState: tree.children[0].context.previousState, currentState: tree.children[0].context.currentState };
         // console.log("None hooked", tree.children[0], state);
         break;
@@ -133,10 +104,7 @@ export async function renderAsync(element: ReactElement, root: Element, options:
 
       if (done) break;
 
-      rootQueue.push([
-        rootNativeNode,
-        tree
-      ]);
+      rootQueue.push(rootNativeNode);
     } while (rootQueue.length && !caughtError && (typeof remainingIterations !== "number" || remainingIterations > 0));
   } catch (error) {
     caughtError = caughtError ?? error;
@@ -152,18 +120,11 @@ export async function renderAsync(element: ReactElement, root: Element, options:
 
   return [rootNativeNode, context];
 
-  function anyHooked(tree: RenderContextTree): boolean {
+  function anyHooked(context: RenderContext): boolean {
     return (
-      tree.context.dispatcher.hooked ||
-      tree.children.findIndex(anyHooked) > -1
+      context.dispatcher.hooked ||
+      [...context.children].findIndex(anyHooked) > -1
     );
-  }
-
-  function setQueues(tree: RenderContextTree, queues: Map<RenderContext, DeferredActionIterator>) {
-    queues.set(tree.context, tree.context.actionsIterator);
-    for (const child of tree.children) {
-      setQueues(child, queues);
-    }
   }
 
   function buildTree(context: RenderContext): RenderContextTree {
@@ -178,16 +139,7 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   function createVNodeFromElement(element: ReactElement) {
     return createVNode(
       { reference: Fragment, source: element, options: {} },
-      {
-        context,
-        actions: context.actions,
-        stateChanges,
-        contextMap: new Map(),
-        errorBoundary: onAnyError,
-        promise: unknownPromise,
-        createVNode,
-        root
-      }
+      context.createChildRenderContextOptions({})
     );
   }
 

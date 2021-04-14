@@ -16,7 +16,7 @@ import {
   isElementDOMNativeVNode,
   DOMNativeVNode
 } from "@opennetwork/vdom";
-import { RenderContext, RenderContextOptions, RenderOptions } from "./context";
+import { RenderContext, RenderContextOptions } from "./context";
 
 
 export async function *renderGenerator<P>(context: RenderContext<P>): AsyncIterable<ElementDOMNativeVNode[]> {
@@ -98,11 +98,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
             yield *flatten(transform({
               actions: dispatcher.actions,
               createVNode: context.createVNode,
-              options: {
-                ...childrenOptions,
-                context,
-                parent: context
-              },
+              options: context.createChildRenderContextOptions(childrenOptions),
               element: latestValue
             }));
           }

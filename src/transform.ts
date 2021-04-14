@@ -10,10 +10,10 @@ import type { DOMNativeVNode, NativeOptionsVNode } from "@opennetwork/vdom";
 import type { createVNode } from "./node";
 import { Native as DOMNative } from "@opennetwork/vdom";
 import { Native } from "./native-node";
-import { RenderOptions } from "./context";
+import { CreateRenderContextOptions } from "./context";
 
 export interface TransformContext {
-  options: RenderOptions;
+  options: CreateRenderContextOptions;
   actions: DeferredActionCollector;
   element: unknown;
   createVNode: typeof createVNode;

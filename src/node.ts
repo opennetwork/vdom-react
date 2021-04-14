@@ -8,7 +8,7 @@ import { renderGenerator } from "./render";
 import { createState, State } from "./state";
 import { DeferredActionCollector } from "./queue";
 import { Collector } from "microtask-collector";
-import type { RenderContext, CreateVNodeFnCatch, RenderOptions } from "./context";
+import type { RenderContext, CreateVNodeFnCatch, CreateRenderContextOptions } from "./context";
 
 export interface ReactContextDescriptor<T = unknown> {
   currentValue: T;
@@ -19,9 +19,7 @@ export type ReactContextMap = Map<ReactContext<unknown>, ReactContextDescriptor>
 // Compile time type guard
 type ThrowAway = CreateVNodeFnCatch<typeof createVNode>;
 
-export function createVNode(node: VNode, options: RenderOptions): DOMNativeVNode {
-  const controller = options.context.controller;
-  const renderContext = options.context;
+export function createVNode(node: VNode, options: CreateRenderContextOptions): DOMNativeVNode {
 
   const PROPS_BRAND = Symbol("This object is branded as this components props");
 
@@ -45,6 +43,9 @@ export function createVNode(node: VNode, options: RenderOptions): DOMNativeVNode
   assertProps<Props>(props);
   assertFunction(source);
   assertFragment(reference);
+
+  const renderContext = options.createChildContext(source, props);
+  const controller = renderContext.controller;
 
   let latestChildren: DOMNativeVNode[] | undefined = undefined;
   const native = Native(

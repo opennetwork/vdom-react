@@ -5,7 +5,7 @@ import { SimpleSignal } from "./cancellable";
 import type { Controller, RenderMeta } from "./controller";
 import { Collector } from "microtask-collector";
 import { DeferredAction, DeferredActionIterator } from "./queue";
-import { State, StateContainer } from "./state";
+import { createState, State, StateContainer } from "./state";
 import { ReactContextMap } from "./node";
 import { createReactDispatcher, Dispatcher } from "./dispatcher";
 import { ComponentInstanceMap } from "./component";
@@ -28,18 +28,23 @@ export interface RenderContextOptions extends DOMRenderOptions {
   createVNode: CreateVNodeFn;
 }
 
-export interface RenderOptions extends RenderContextOptions {
-  context: RenderContext;
+export interface RenderSourceContextOptions extends RenderContextOptions {
+  source?: () => void;
+  initialProps?: unknown;
 }
 
-export interface CreateVNodeFn extends CreateVNodeFnPrototype<RenderOptions, VNode, ElementDOMNativeVNode, DOMNativeVNode> {
-  (source: VNode, options: RenderOptions): DOMNativeVNode;
+export interface CreateRenderContextOptions extends RenderContextOptions {
+  createChildContext(source: () => unknown, props: unknown): RenderContext;
+}
+
+export interface CreateVNodeFn extends CreateVNodeFnPrototype<CreateRenderContextOptions, VNode, ElementDOMNativeVNode, DOMNativeVNode> {
+  (source: VNode, options: CreateRenderContextOptions): DOMNativeVNode;
 }
 
 export type CreateVNodeFnCatch<Fn extends CreateVNodeFn> = Fn;
 
 export interface RenderContext<P = unknown> extends Controller {
-  options: RenderContextOptions;
+  options: RenderSourceContextOptions;
   currentState: State;
   previousState?: StateContainer;
   previousProps?: P;
@@ -57,6 +62,8 @@ export interface RenderContext<P = unknown> extends Controller {
   instance: ComponentInstanceMap<P>;
   source: () => unknown;
   yielded: boolean;
+
+  createChildContext(options: RenderContextOptions): RenderContext;
 }
 
 export class RenderContext<P = unknown> extends DOMVContext implements RenderContext<P> {
@@ -70,7 +77,7 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
   actionsIterator: DeferredActionIterator;
   actions;
 
-  options: RenderContextOptions;
+  options: RenderSourceContextOptions;
   currentState: State;
   previousState?: StateContainer;
   previousProps?: P;
@@ -89,6 +96,8 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
   source: () => unknown;
   yielded: boolean;
 
+  children = new Set<RenderContext>();
+
   get aborted() {
     return this.#signal.aborted;
   }
@@ -97,13 +106,16 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
     this.#nodes.add(node);
   }
 
-  willContinue?(renderContext: RenderContext, meta: RenderMeta): boolean | Promise<boolean>;
+  willContinue?(renderContext: RenderContext, meta: RenderMeta) {
+    return false;
+  }
+
   beforeRender?(renderContext: RenderContext, meta: RenderMeta): boolean | Promise<boolean>;
   afterRender?(renderContext: RenderContext, meta: RenderMeta, willContinue: boolean): boolean | Promise<boolean>;
   beforeDestroyed?(renderContext: RenderContext): void | Promise<void>;
   afterDestroyed?(renderContext: RenderContext): void | Promise<void>;
 
-  constructor(options: RenderContextOptions) {
+  constructor(options: RenderSourceContextOptions) {
     super(options);
 
     this.options = options;
@@ -121,6 +133,36 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
     this.actions = this.dispatcher.actions;
     this.actionsIterator = this.actions[Symbol.asyncIterator]();
     this.createVNode = options.createVNode;
+    this.currentState = this.dispatcher.state;
+    this.previousState = createState().container;
+    this.source = options.source;
+  }
+
+  createChildRenderContextOptions(options: Partial<RenderContextOptions>): CreateRenderContextOptions {
+    const parent = this;
+    const resolvedOptions = {
+      ...parent.options,
+      ...options
+    };
+    return {
+      ...resolvedOptions,
+      createChildContext(source: () => unknown, props: unknown): RenderContext {
+        return parent.createChildContext({
+          ...resolvedOptions,
+          source,
+          initialProps: props
+        });
+      }
+    };
+  }
+
+  createChildContext(options: RenderSourceContextOptions): RenderContext {
+    const context = new RenderContext({
+      ...options,
+      parent: this
+    });
+    this.children.add(context);
+    return context;
   }
 
   hydrate(node: VNode, tree?: Tree): Promise<void> {

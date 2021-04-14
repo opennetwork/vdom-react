@@ -11,6 +11,7 @@ export type NeverEndingPromise = Promise<[NeverEndingPromise]>;
 
 export interface State<Value = void> extends StateContainer<Value>, AsyncIterable<symbol> {
   readonly promise: NeverEndingPromise;
+  readonly container: StateContainer<Value>;
   change(value: Value): void;
 }
 let globalStateIndex = -1;
@@ -28,6 +29,12 @@ export function createState<Value = void>(initialValue: Value = undefined, state
     },
     get value() {
       return value;
+    },
+    get container() {
+      return {
+        symbol,
+        value
+      };
     },
     change(nextValue: Value) {
       value = nextValue;
