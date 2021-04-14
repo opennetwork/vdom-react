@@ -5,13 +5,10 @@ import { isAbortLifecycleError } from "./lifecycle";
 import { createVNode as createBasicVNode } from "@opennetwork/vnode";
 import { assertReactElement, isReactComponentClass } from "./type-guards";
 import { transform } from "./transform";
-import { DeferredActionIterator } from "./queue";
 import { isPromise } from "iterable";
-import { ComponentInstanceMap, renderComponent } from "./component";
+import { renderComponent } from "./component";
 import { renderFunction } from "./function";
-import type { Options, createVNode } from "./node";
-import type { Dispatcher } from "./dispatcher";
-import type { State, StateContainer } from "./state";
+import type { StateContainer } from "./state";
 import {
   ElementDOMNativeVNode,
   Native,
@@ -19,7 +16,7 @@ import {
   isElementDOMNativeVNode,
   DOMNativeVNode
 } from "@opennetwork/vdom";
-import { RenderContext } from "./context";
+import { RenderContext, RenderContextOptions, RenderOptions } from "./context";
 
 
 export async function *renderGenerator<P>(context: RenderContext<P>): AsyncIterable<ElementDOMNativeVNode[]> {
@@ -27,8 +24,8 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
     dispatcher,
     parent,
     controller,
-    destroy,
-    updateQueueIterator,
+    close,
+    actionsIterator,
     options
   } = context;
 
@@ -99,10 +96,11 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
           } else {
             assertReactElement(latestValue);
             yield *flatten(transform({
-              updateQueue: dispatcher.updateQueue,
+              actions: dispatcher.actions,
               createVNode: context.createVNode,
               options: {
                 ...childrenOptions,
+                context,
                 parent: context
               },
               element: latestValue
@@ -124,7 +122,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
   } while (!context.isDestroyable && (await controller?.afterRender?.(context, renderMeta, willContinue) ?? true) && willContinue && dispatcher.hooked && controller?.aborted !== true && !caughtError);
 
   if (caughtError) {
-    await destroy();
+    await close();
     await Promise.reject(caughtError);
   }
 
@@ -149,7 +147,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
       // If we are here, and we know this error, it was already thrown and resolved
       // Else we already know about it and it is in our update queue
       if (!knownPromiseErrors.has(error)) {
-        dispatcher.updateQueue.add(async () => {
+        dispatcher.actions.add(async () => {
           await promiseError;
           dispatcher.state.change();
         });
@@ -159,13 +157,13 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
     } else if (await options.errorBoundary(error)) {
       // If the error boundary returned true, the error should be thrown later on
       caughtError = error;
-      await updateQueueIterator.return?.();
+      await actionsIterator.return?.();
     }
     return true;
   }
 }
 
-export async function render<P>(context: RenderContext<P>): Promise<[unknown, Options]>  {
+export async function render<P>(context: RenderContext<P>): Promise<[unknown, RenderContextOptions]>  {
   const { source, currentProps: props } = context;
   if (isReactComponentClass<P, Record<string, unknown>>(source)) {
     return renderComponent(context, source);

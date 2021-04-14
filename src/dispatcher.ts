@@ -254,7 +254,7 @@ export function createReactDispatcher(context: DispatcherContext) {
     hook: WorkInProgressHook<S, WorkInProgressHookQueue<S, A>>,
     action: A
   ) {
-    dispatcher.updateQueue.add(() => {
+    dispatcher.actions.add(() => {
       const currentState = hook.memoizedState;
       const nextState = hook.queue.lastRenderedReducer(currentState, action);
       console.log({ currentState, nextState, q: hook.queue.lastRenderedReducer, action, is: Object.is(nextState, currentState) });

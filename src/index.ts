@@ -1,20 +1,18 @@
 import { ReactElement } from "react";
 import { DOMNativeVNode, DOMVContext } from "@opennetwork/vdom";
 import { createVNode } from "./node";
-import { Fragment, hydrate, Tree } from "@opennetwork/vnode";
+import { Fragment, hydrate } from "@opennetwork/vnode";
 import { Collector } from "microtask-collector";
-import { ReactDOMVContext } from "./context";
-import { RenderContext } from "./render";
+import { RenderContext } from "./context";
 import { DeferredAction, DeferredActionCollector, DeferredActionIterator, DeferredActionIteratorResult } from "./queue";
-import { noop } from "./noop";
-import { NeverEndingPromise, State, StateContainer } from "./state";
+import { State, StateContainer } from "./state";
 
 export type {
   DOMNativeVNode,
-  ReactDOMVContext
+  RenderContext
 };
 
-const contexts = new WeakMap<Element, ReactDOMVContext>();
+const contexts = new WeakMap<Element, RenderContext>();
 const roots = new WeakMap<DOMVContext, RenderContext>();
 const children = new WeakMap<RenderContext, Set<RenderContext>>();
 const nodes = new WeakMap<RenderContext, DOMNativeVNode>();
@@ -32,9 +30,9 @@ interface RenderDetails {
 
 interface RenderOptions {
   rendered?(details: RenderDetails): Promise<void> | void;
-  collector?: Collector<DeferredAction>;
+  actions?: Collector<DeferredAction>;
   stateChanges?: Collector<State>;
-  context?: ReactDOMVContext;
+  context?: RenderContext;
   maxIterations?: number;
 }
 
@@ -42,8 +40,8 @@ export function render(node: ReactElement, root: Element, options: RenderOptions
   return renderAsync(node, root, options);
 }
 
-export async function renderAsync(element: ReactElement, root: Element, options: RenderOptions = {}): Promise<[DOMNativeVNode, ReactDOMVContext]> {
-  const collector = options.collector ?? new Collector<DeferredAction>({
+export async function renderAsync(element: ReactElement, root: Element, options: RenderOptions = {}): Promise<[DOMNativeVNode, RenderContext]> {
+  const actions = options.actions ?? new Collector<DeferredAction>({
     eagerCollection: true
   });
   const stateChanges = options.stateChanges ?? new Collector<State>({
@@ -51,9 +49,14 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   });
   const stateChangeIterator = stateChanges[Symbol.asyncIterator]();
 
-  const context = options.context ?? contexts.get(root) ?? new ReactDOMVContext({
-    root,
-    promise: unknownPromise
+  const context = options.context ?? contexts.get(root) ?? new RenderContext({
+    actions,
+    stateChanges,
+    contextMap: new Map(),
+    errorBoundary: onAnyError,
+    promise: unknownPromise,
+    createVNode,
+    root
   });
   contexts.set(root, context);
   let rootRenderContext = roots.get(context);
@@ -81,7 +84,7 @@ export async function renderAsync(element: ReactElement, root: Element, options:
 
   let caughtError: unknown = undefined;
   const promises = new Set<Promise<unknown>>();
-  let accumulativePromise: Promise<void> | undefined = wait(collector);
+  let accumulativePromise: Promise<void> | undefined = wait(actions);
 
   const initialNativeNode = createVNodeFromElement(element);
 
@@ -138,7 +141,6 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   } catch (error) {
     caughtError = caughtError ?? error;
   } finally {
-    collector.close();
     await context.close();
     await accumulativePromise;
     await Promise.all(promises);
@@ -158,7 +160,7 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   }
 
   function setQueues(tree: RenderContextTree, queues: Map<RenderContext, DeferredActionIterator>) {
-    queues.set(tree.context, tree.context.updateQueueIterator);
+    queues.set(tree.context, tree.context.actionsIterator);
     for (const child of tree.children) {
       setQueues(child, queues);
     }
@@ -175,14 +177,17 @@ export async function renderAsync(element: ReactElement, root: Element, options:
 
   function createVNodeFromElement(element: ReactElement) {
     return createVNode(
+      { reference: Fragment, source: element, options: {} },
       {
-        controller: context,
-        updateQueue: collector,
+        context,
+        actions: context.actions,
         stateChanges,
         contextMap: new Map(),
-        errorBoundary: onAnyError
-      },
-      { reference: Fragment, source: element, options: {} }
+        errorBoundary: onAnyError,
+        promise: unknownPromise,
+        createVNode,
+        root
+      }
     );
   }
 
@@ -214,7 +219,7 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   }
 
   function unknownPromise(promise: Promise<unknown>) {
-    collector.add(() => promise);
+    actions.add(() => promise);
   }
 
   function onAnyError(error: unknown) {

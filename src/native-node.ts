@@ -14,7 +14,7 @@ import { Native as DOMNative } from "@opennetwork/vdom";
 export interface NativeElement extends ReactElement {
   ref?: unknown;
   type: string;
-  collector: DeferredActionCollector;
+  actions: DeferredActionCollector;
   children: AsyncIterable<ReadonlyArray<VNode>>;
 }
 
@@ -33,10 +33,10 @@ export function Native(element: NativeElement): DOMNativeVNode {
 }
 
 async function onBeforeRender(context: NativeElement, node: NativeOptionsVNode, documentNode: Element & ProxiedListeners | Text) {
-  const { collector, props, ref } = context;
+  const { actions, props, ref } = context;
 
   if (!isElement(documentNode)) return;
-  documentNode._collector = documentNode._collector ?? collector;
+  documentNode._actions = documentNode._actions ?? actions;
 
   const attributes: NativeAttributes = {};
   let hasAttribute = false;

@@ -1,12 +1,12 @@
 import type { RenderOptions as DOMRenderOptions } from "@opennetwork/vdom";
-import type { Tree, VNode, CreateVNodeFnCatch as CreateVNodeFnCatchPrototype } from "@opennetwork/vnode";
+import type { Tree, VNode } from "@opennetwork/vnode";
 import { DOMNativeVNode, DOMVContext, ElementDOMNativeVNode } from "@opennetwork/vdom";
 import { SimpleSignal } from "./cancellable";
 import type { Controller, RenderMeta } from "./controller";
 import { Collector } from "microtask-collector";
-import { DeferredAction, DeferredActionCollector, DeferredActionIterator } from "./queue";
+import { DeferredAction, DeferredActionIterator } from "./queue";
 import { State, StateContainer } from "./state";
-import { createVNode, CreateVNodeFn, Options, ReactContextMap } from "./node";
+import { ReactContextMap } from "./node";
 import { createReactDispatcher, Dispatcher } from "./dispatcher";
 import { ComponentInstanceMap } from "./component";
 import { CreateVNodeFn as CreateVNodeFnPrototype } from "@opennetwork/vnode/dist/create-node";
@@ -32,53 +32,53 @@ export interface RenderOptions extends RenderContextOptions {
   context: RenderContext;
 }
 
-export interface CreateVNodeFn extends CreateVNodeFnPrototype<Options, VNode, ElementDOMNativeVNode, DOMNativeVNode> {
+export interface CreateVNodeFn extends CreateVNodeFnPrototype<RenderOptions, VNode, ElementDOMNativeVNode, DOMNativeVNode> {
   (source: VNode, options: RenderOptions): DOMNativeVNode;
 }
 
 export type CreateVNodeFnCatch<Fn extends CreateVNodeFn> = Fn;
 
 export interface RenderContext<P = unknown> extends Controller {
-  readonly options: RenderContextOptions;
-  readonly currentState: State;
+  options: RenderContextOptions;
+  currentState: State;
   previousState?: StateContainer;
   previousProps?: P;
   currentProps?: P;
-  readonly actions: Collector<DeferredAction>;
-  readonly dispatcher: Dispatcher;
+  actions: Collector<DeferredAction>;
+  dispatcher: Dispatcher;
   parent?: RenderContext;
-  readonly controller?: Controller;
+  controller?: Controller;
   rendering?: Promise<void>;
-  readonly createVNode: CreateVNodeFn;
+  createVNode: CreateVNodeFn;
   continueFlag?: () => boolean;
-  readonly isDestroyable: boolean;
-  readonly destroyed: boolean;
+  isDestroyable: boolean;
+  destroyed: boolean;
   actionsIterator: DeferredActionIterator;
   instance: ComponentInstanceMap<P>;
   source: () => unknown;
   yielded: boolean;
 }
 
-export class ReactContext<P = unknown> extends DOMVContext implements RenderContext<P> {
+export class RenderContext<P = unknown> extends DOMVContext implements RenderContext<P> {
 
   readonly #signal = new SimpleSignal();
   readonly #promise;
 
   readonly #nodes = new Set<DOMNativeVNode>();
 
-  readonly dispatcher;
-  readonly actionsIterator;
-  readonly actions;
+  dispatcher;
+  actionsIterator: DeferredActionIterator;
+  actions;
 
-  readonly options: RenderOptions;
-  readonly currentState: State;
+  options: RenderContextOptions;
+  currentState: State;
   previousState?: StateContainer;
   previousProps?: P;
   currentProps?: P;
   parent?: RenderContext;
-  readonly controller: Controller;
+  controller?: Controller;
   rendering?: Promise<void>;
-  readonly createVNode: CreateVNodeFn;
+  createVNode: CreateVNodeFn;
 
   continueFlag?: () => boolean;
   isDestroyable = false;
@@ -128,11 +128,12 @@ export class ReactContext<P = unknown> extends DOMVContext implements RenderCont
   }
 
   async close() {
-
     this.isDestroyable = true;
-
-
-
+    this.destroyed = true;
+    await this.controller.beforeDestroyed?.(this);
+    await this.dispatcher.destroyHookEffectList(0);
+    await this.controller.afterDestroyed?.(this);
+    this.dispatcher.actions.close();
     return super.close();
   }
 

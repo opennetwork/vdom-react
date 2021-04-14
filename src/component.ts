@@ -1,12 +1,11 @@
 import type { Component as ReactComponent, ComponentClass as ReactComponentClass } from "react";
 import { useReactComponentLifecycleRender } from "./lifecycle";
 import { isReactErrorBoundaryInstance } from "./type-guards";
-import type { Options } from "./node";
-import type { RenderContext } from "./render";
+import type { RenderContext, RenderContextOptions } from "./context";
 
 export type ComponentInstanceMap<P> = WeakMap<ReactComponentClass<P, unknown>, ReactComponent<P, unknown>>;
 
-export async function renderComponent<P>(context: RenderContext<P>, source: ReactComponentClass<P, unknown>): Promise<[unknown, Options] | undefined>  {
+export async function renderComponent<P>(context: RenderContext<P>, source: ReactComponentClass<P, unknown>): Promise<[unknown, RenderContextOptions] | undefined>  {
   const {
     instance,
     currentProps: props,
@@ -31,7 +30,7 @@ export async function renderComponent<P>(context: RenderContext<P>, source: Reac
     render: currentInstance.render,
   });
 
-  const childrenOptions: Options = {
+  const childrenOptions: RenderContextOptions = {
     ...options
   };
 

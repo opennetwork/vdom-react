@@ -3,7 +3,7 @@ import { isPromise } from "iterable";
 
 export interface ProxiedListeners {
   _listeners?: Record<string, (event: Event) => void>;
-  _collector?: DeferredActionCollector;
+  _actions?: DeferredActionCollector;
 }
 
 export function eventProxy(this: ProxiedListeners, event: Event) {
@@ -26,11 +26,11 @@ function scopedEvent(this: ProxiedListeners, event: Event, useCapture: boolean) 
         const action: DeferredAction & { priority?: number, render?: boolean } = () => result;
         action.priority = 1;
         action.render = false;
-        this._collector?.add(action);
+        this._actions?.add(action);
       }
     } catch (error) {
-      if (this._collector) {
-        this._collector.add(() => Promise.reject(error));
+      if (this._actions) {
+        this._actions.add(() => Promise.reject(error));
       } else {
         // Uncaught error!
         throw error;

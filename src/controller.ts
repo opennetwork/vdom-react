@@ -1,6 +1,6 @@
 import type { AbortSignal } from "./cancellable";
 import type { StateContainer } from "./state";
-import type { RenderContext } from "./render";
+import type { RenderContext } from "./context";
 import type { DOMNativeVNode } from "@opennetwork/vdom";
 
 export interface RenderMeta {
