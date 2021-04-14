@@ -1156,20 +1156,20 @@
   resolved "https://registry.npmjs.org/@opennetwork/progressive-merge/-/progressive-merge-5.1.1.tgz#c4cf4086a47883cc25fea5bd38d15c1a81ae550d"
   integrity sha512-GyDyKaQoEszWFzIjEO7MFrU4TCv6fTiXrKl3w+Fr4TU90cQ/gtFhO+vBq9aaqC/KvU8Rw1F4hbUBgV07SZDwoA==
 
-"@opennetwork/vdom@^11.1.0":
-  version "11.1.0"
-  resolved "https://registry.npmjs.org/@opennetwork/vdom/-/vdom-11.1.0.tgz#4c5d999373f67bb3029a69d0ac25b39db73a99c0"
-  integrity sha512-Q/536nZx3ZUnPPSdWKu/vV/zWmWF0EC6h8/xtizQ5mBGc/sU3YjxG6l21zznlJL/+v9D4O9uoG++9zTMhxGX8w==
+"@opennetwork/vdom@^12.0.0":
+  version "12.0.0"
+  resolved "https://registry.npmjs.org/@opennetwork/vdom/-/vdom-12.0.0.tgz#5548f8c07b0ed835176b1139de2fe2d4fa3de9c6"
+  integrity sha512-ytIHfhugRiB2I7aKDlmXf7o/cFGW5E4utOjHgxiul7QhNB694XzJZ6tUrXkOjPuzO4uA4RdYnt3NdVBKGHRxHA==
 
 "@opennetwork/vnode-hooks@^6.0.0":
   version "6.0.0"
   resolved "https://registry.npmjs.org/@opennetwork/vnode-hooks/-/vnode-hooks-6.0.0.tgz#6c49801ab4f992fe89637aebba6fbd0d5190439f"
   integrity sha512-f293RTv4/nGD5bl/SLFMtOfxQDC4NvA2Xmk06GEHNHndPPP89/Q0aNBpzeUADSr6VeIp8IbkaebzRS3mU6elBg==
 
-"@opennetwork/vnode@^20.0.0":
-  version "20.0.0"
-  resolved "https://registry.npmjs.org/@opennetwork/vnode/-/vnode-20.0.0.tgz#aef5eb5e51c22dde0b6406f5c0dd05fa65740ab0"
-  integrity sha512-l7n0tYmhKC3IjWFBx9Tbcv8SJiHg4lE4klKP6lDSfxU3AVBbEx0qgXAvDW1NYH3L+ZwB1sdahFwqddV/bkfhig==
+"@opennetwork/vnode@^21.1.0":
+  version "21.1.0"
+  resolved "https://registry.npmjs.org/@opennetwork/vnode/-/vnode-21.1.0.tgz#dd0432ca9d498ac50e956514517a9c8b421b0262"
+  integrity sha512-dub5LNOYYMmdyKkwFJL4blEltRU/GQIrReX5xTp4JVLn0ZXLYZyizxuAVay2ElOup+Ul7asLAmvTV3VhG9xoag==
 
 "@sinonjs/commons@^1.7.0":
   version "1.8.3"
@@ -1278,15 +1278,10 @@
     jest-diff "^26.0.0"
     pretty-format "^26.0.0"
 
-"@types/node@*":
+"@types/node@*", "@types/node@^14.14.37":
   version "14.14.37"
   resolved "https://registry.npmjs.org/@types/node/-/node-14.14.37.tgz#a3dd8da4eb84a996c36e331df98d82abd76b516e"
   integrity sha512-XYmBiy+ohOR4Lh5jE379fV2IU+6Jn4g5qASinhitfyO71b/sCo6MKsMLF5tc7Zf2CE8hViVQyYSobJNke8OvUw==
-
-"@types/node@^14.14.35":
-  version "14.14.35"
-  resolved "https://registry.npmjs.org/@types/node/-/node-14.14.35.tgz#42c953a4e2b18ab931f72477e7012172f4ffa313"
-  integrity sha512-Lt+wj8NVPx0zUmUwumiVXapmaLUcAk3yPuHCFVXras9k5VT9TdhJqKqGVUQCD60OTMCl0qxJ57OiTL0Mic3Iag==
 
 "@types/normalize-package-data@^2.4.0":
   version "2.4.0"

@@ -4,10 +4,11 @@ import type { ComponentClass as ReactComponentClass, Context as ReactContext, } 
 import { Controller } from "./controller";
 import { assertFragment, assertFunction, assertProps, isReactElement } from "./type-guards";
 import { createReactDispatcher } from "./dispatcher";
-import { RenderContext, renderGenerator } from "./render";
+import { renderGenerator } from "./render";
 import { createState, State } from "./state";
 import { DeferredActionCollector } from "./queue";
 import { Collector } from "microtask-collector";
+import type { RenderContext, CreateVNodeFnCatch, RenderOptions } from "./context";
 
 export interface ReactContextDescriptor<T = unknown> {
   currentValue: T;
@@ -17,25 +18,28 @@ export type ReactContextMap = Map<ReactContext<unknown>, ReactContextDescriptor>
 
 export interface Options extends Record<string | symbol, unknown> {
   controller: Controller;
-  updateQueue: DeferredActionCollector;
+  actions: DeferredActionCollector;
   stateChanges: Collector<State>;
   contextMap: ReactContextMap;
   // Returns false if error should be ignored, or true to throw it further
   errorBoundary(error: unknown): boolean;
-  parent?: RenderContext;
+  context: RenderContext;
 }
 
-export function createVNode(options: Options, node: VNode): DOMNativeVNode {
+// Compile time type guard
+type ThrowAway = CreateVNodeFnCatch<typeof createVNode>;
+
+export function createVNode(node: VNode, options: RenderOptions): DOMNativeVNode {
   const PROPS_BRAND = Symbol("This object is branded as this components props");
 
   if (isReactElement(node.source) && typeof node.source.type === "function") {
     return createVNode(
-      options,
       {
         reference: node.source.key || Fragment,
         source: node.source.type,
         options: node.source.props
-      }
+      },
+      options
     );
   }
 
@@ -53,10 +57,10 @@ export function createVNode(options: Options, node: VNode): DOMNativeVNode {
   const instance = new Map<ReactComponentClass<Props, unknown>, InstanceType<ReactComponentClass<Props, unknown>>>();
   const dispatcher = createReactDispatcher({
     contextMap: options.contextMap,
-    updateQueue: options.updateQueue,
+    actions: options.actions,
     stateChanges: options.stateChanges,
   });
-  const updateQueueIterator = dispatcher.updateQueue[Symbol.asyncIterator]();
+  const actionsIterator = dispatcher.updateQueue[Symbol.asyncIterator]();
 
   let isDestroyable = false,
     destroyed = false;
@@ -64,6 +68,10 @@ export function createVNode(options: Options, node: VNode): DOMNativeVNode {
   const controller = options.controller;
   const renderContext: RenderContext<Props> = {
     dispatcher,
+    actions: dispatcher.actions,
+    get aborted() {
+      return renderContext.isDestroyable;
+    },
     options,
     source,
     destroy: actuallyDestroy,
@@ -79,7 +87,7 @@ export function createVNode(options: Options, node: VNode): DOMNativeVNode {
       return destroyed;
     },
     instance,
-    updateQueueIterator,
+    actionsIterator,
     get previousProps() {
       return previousProps;
     },
@@ -87,7 +95,7 @@ export function createVNode(options: Options, node: VNode): DOMNativeVNode {
       previousProps = value;
     },
     rendering: undefined,
-    parent: options.parent,
+    yielded: false,
     controller: options.controller,
     currentProps: undefined,
     continueFlag: undefined,
@@ -111,10 +119,9 @@ export function createVNode(options: Options, node: VNode): DOMNativeVNode {
           for await (const nextChildren of renderGenerator(renderContext)) {
             latestChildren = nextChildren;
             yield nextChildren;
-            yielded = true;
+            yielded = renderContext.yielded = true;
           }
-          console.log({ yielded, latestChildren });
-          if (!yielded && latestChildren) {
+          if (!yielded && renderContext.yielded && latestChildren) {
             yield latestChildren;
           }
         }

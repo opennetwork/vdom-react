@@ -19,26 +19,8 @@ import {
   isElementDOMNativeVNode,
   DOMNativeVNode
 } from "@opennetwork/vdom";
+import { RenderContext } from "./context";
 
-export interface RenderContext<P = unknown> {
-  readonly options: Options;
-  readonly currentState: State;
-  previousState: StateContainer;
-  previousProps: P;
-  currentProps: P;
-  readonly dispatcher: Dispatcher;
-  parent?: RenderContext;
-  controller?: Controller;
-  rendering: Promise<void>;
-  createVNode: typeof createVNode;
-  continueFlag?: () => boolean;
-  readonly isDestroyable: boolean;
-  readonly destroyed: boolean;
-  destroy(): void;
-  updateQueueIterator: DeferredActionIterator;
-  instance: ComponentInstanceMap<P>;
-  source: () => unknown;
-}
 
 export async function *renderGenerator<P>(context: RenderContext<P>): AsyncIterable<ElementDOMNativeVNode[]> {
   const {
@@ -81,8 +63,8 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
       previousProps: renderedProps
     };
 
-    console.log(renderMeta, context.source);
-    if (renderedState.symbol !== renderingState.symbol) {
+    console.log({ yielded: context.yielded });
+    if (renderedState.symbol !== renderingState.symbol || !context.yielded) {
       try {
         if (!(await controller?.beforeRender?.(context, renderMeta) ?? true)) break;
         let renderResult;
@@ -91,6 +73,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
         try {
           renderResult = await render(context);
         } catch (error) {
+          console.log({ error });
           if (await onError(error)) {
             break;
           }
@@ -138,7 +121,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
       await dispatcher.commitHookEffectList(0);
     }
     willContinue = (await controller?.willContinue?.(context, renderMeta) ?? false);
-  } while (!context.isDestroyable && willContinue && (await controller?.afterRender?.(context, renderMeta) ?? true) && dispatcher.hooked && controller?.aborted !== true && !caughtError);
+  } while (!context.isDestroyable && (await controller?.afterRender?.(context, renderMeta, willContinue) ?? true) && willContinue && dispatcher.hooked && controller?.aborted !== true && !caughtError);
 
   if (caughtError) {
     await destroy();

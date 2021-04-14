@@ -31,14 +31,14 @@ export interface ReactContextDescriptor<T = unknown> {
 }
 
 export interface DispatcherContext {
-  readonly updateQueue?: DeferredActionCollector;
+  readonly actions?: DeferredActionCollector;
   readonly contextMap?: Map<unknown, ReactContextDescriptor>;
   readonly stateChanges: Collector<State>;
 }
 
 export interface Dispatcher extends ReactDispatcher, WorkInProgressContext, DispatcherContext {
   readonly state: State;
-  readonly updateQueue: DeferredActionCollector;
+  readonly actions: DeferredActionCollector;
   componentUpdateQueue?: FunctionComponentUpdateQueue;
   commitHookEffectList(tag: number): Promise<void>;
   destroyHookEffectList(tag: number): Promise<void>;
@@ -51,7 +51,7 @@ export function createReactDispatcher(context: DispatcherContext) {
   const dispatcher: Dispatcher = {
     ...createWorkInProgressContext(),
     ...context,
-    updateQueue: context.updateQueue ?? new Collector({
+    actions: context.actions ?? new Collector({
       eagerCollection: true
     }),
     get state() {

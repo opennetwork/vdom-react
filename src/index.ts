@@ -31,7 +31,7 @@ interface RenderDetails {
 }
 
 interface RenderOptions {
-  rendered?(details: RenderDetails): Promise<void>;
+  rendered?(details: RenderDetails): Promise<void> | void;
   collector?: Collector<DeferredAction>;
   stateChanges?: Collector<State>;
   context?: ReactDOMVContext;
