@@ -71,7 +71,6 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   ];
 
   let rootNativeNode: DOMNativeVNode | undefined;
-  let tree: RenderContextTree | undefined;
 
   let remainingIterations = options.maxIterations;
 
@@ -90,9 +89,7 @@ export async function renderAsync(element: ReactElement, root: Element, options:
         remainingRootsToFlush: rootQueue.length
       });
 
-      tree = buildTree(context);
-
-      if (!anyHooked(context) || remainingIterations === 0) {
+      if (!context.hooked || remainingIterations === 0) {
         // const state = { previousState: tree.children[0].context.previousState, currentState: tree.children[0].context.currentState };
         // console.log("None hooked", tree.children[0], state);
         break;
@@ -119,22 +116,6 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   }
 
   return [rootNativeNode, context];
-
-  function anyHooked(context: RenderContext): boolean {
-    return (
-      context.dispatcher.hooked ||
-      [...context.children].findIndex(anyHooked) > -1
-    );
-  }
-
-  function buildTree(context: RenderContext): RenderContextTree {
-    const childrenArray = [...(children.get(context) ?? [])];
-    return {
-      context,
-      node: nodes.get(context),
-      children: childrenArray.map(buildTree)
-    };
-  }
 
   function createVNodeFromElement(element: ReactElement) {
     return createVNode(

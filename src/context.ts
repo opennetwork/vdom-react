@@ -44,6 +44,7 @@ export interface CreateVNodeFn extends CreateVNodeFnPrototype<CreateRenderContex
 export type CreateVNodeFnCatch<Fn extends CreateVNodeFn> = Fn;
 
 export interface RenderContext<P = unknown> extends Controller {
+
   options: RenderSourceContextOptions;
   currentState: State;
   previousState?: StateContainer;
@@ -97,6 +98,18 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
   yielded: boolean;
 
   children = new Set<RenderContext>();
+
+  get hooked() {
+    if (this.dispatcher.hooked) {
+      return true;
+    }
+    for (const child of this.children) {
+      if (child.hooked) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   get aborted() {
     return this.#signal.aborted;
