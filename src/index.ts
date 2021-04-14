@@ -1,10 +1,10 @@
 import { ReactElement } from "react";
-import { DOMNativeVNode, DOMVContext } from "@opennetwork/vdom";
+import { DOMNativeVNode } from "@opennetwork/vdom";
 import { createVNode } from "./node";
 import { Fragment, hydrate } from "@opennetwork/vnode";
 import { Collector } from "microtask-collector";
 import { RenderContext } from "./context";
-import { DeferredAction, DeferredActionCollector, DeferredActionIterator, DeferredActionIteratorResult } from "./queue";
+import { DeferredAction, DeferredActionCollector, DeferredActionIteratorResult } from "./queue";
 import { State, StateContainer } from "./state";
 
 export type {
@@ -13,16 +13,7 @@ export type {
 };
 
 const contexts = new WeakMap<Element, RenderContext>();
-const roots = new WeakMap<DOMVContext, RenderContext>();
-const children = new WeakMap<RenderContext, Set<RenderContext>>();
-const nodes = new WeakMap<RenderContext, DOMNativeVNode>();
 const states = new WeakMap<State, RenderContext>();
-
-interface RenderContextTree {
-  context: RenderContext;
-  node?: DOMNativeVNode;
-  children: RenderContextTree[];
-}
 
 interface RenderDetails {
   remainingRootsToFlush?: number;
