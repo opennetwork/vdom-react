@@ -5,7 +5,7 @@ import {
   isReactForwardRefExoticElement
 } from "./type-guards";
 import { Fragment, isSourceReference, VNode } from "@opennetwork/vnode";
-import { createRef, Fragment as ReactFragment, ReactElement } from "react";
+import { Fragment as ReactFragment, ReactElement } from "react";
 import type { DOMNativeVNode, NativeOptionsVNode } from "@opennetwork/vdom";
 import type { createVNode } from "./node";
 import { Native as DOMNative } from "@opennetwork/vdom";
@@ -17,6 +17,7 @@ export interface TransformContext {
   actions: DeferredActionCollector;
   element: unknown;
   createVNode: typeof createVNode;
+  getInstance(source: Function, create: () => DOMNativeVNode): DOMNativeVNode;
 }
 
 export function transform(context: TransformContext): DOMNativeVNode {
@@ -31,7 +32,8 @@ export function initialTransform(context: TransformContext): VNode {
     createVNode,
     options: {
       contextMap
-    }
+    },
+    getInstance
   } = context;
   if (isReactContextConsumerElement(element)) {
     const foundContext = contextMap?.get(element.type._context);
@@ -68,8 +70,11 @@ export function initialTransform(context: TransformContext): VNode {
       throw new Error("Expected ref element");
     }
     const { render: source } = type;
-    const render = source.bind(undefined, props, ref || createRef());
-    return createVNode({ reference: Fragment, source: render, options: props || {} }, context.options);
+    const render = (props: unknown) => source(props, ref);
+    return getInstance(
+      source,
+      () => createVNode({ reference: Fragment, source: render, options: props || {} }, context.options)
+    );
   } else if (isReactElement(element)) {
     const { type, props, ref, key }: ReactElement & { ref?: unknown } = element;
     if (type === ReactFragment) {
@@ -80,7 +85,10 @@ export function initialTransform(context: TransformContext): VNode {
         children: flattenChildren(element.props.children, context)
       };
     } else if (typeof type === "function") {
-      return createVNode({ reference: Fragment, source: type, options: props || {} }, context.options);
+      return getInstance(
+        type,
+        () => createVNode({ reference: Fragment, source: type, options: props || {} }, context.options)
+      );
     } else {
       return Native({
         type,
@@ -119,7 +127,7 @@ export function initialTransform(context: TransformContext): VNode {
         return [
           transform({
             ...context,
-            element: source
+            element: source,
           })
         ];
       }
@@ -129,3 +137,4 @@ export function initialTransform(context: TransformContext): VNode {
   }
 
 }
+

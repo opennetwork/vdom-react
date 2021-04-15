@@ -43,30 +43,6 @@ export interface CreateVNodeFn extends CreateVNodeFnPrototype<CreateRenderContex
 
 export type CreateVNodeFnCatch<Fn extends CreateVNodeFn> = Fn;
 
-export interface RenderContext<P = unknown> extends Controller {
-
-  options: RenderSourceContextOptions;
-  currentState: State;
-  previousState?: StateContainer;
-  previousProps?: P;
-  currentProps?: P;
-  actions: Collector<DeferredAction>;
-  dispatcher: Dispatcher;
-  parent?: RenderContext;
-  controller?: Controller;
-  rendering?: Promise<void>;
-  createVNode: CreateVNodeFn;
-  continueFlag?: () => boolean;
-  isDestroyable: boolean;
-  destroyed: boolean;
-  actionsIterator: DeferredActionIterator;
-  instance: ComponentInstanceMap<P>;
-  source: () => unknown;
-  yielded: boolean;
-
-  createChildContext(options: RenderContextOptions): RenderContext;
-}
-
 export class RenderContext<P = unknown> extends DOMVContext implements RenderContext<P> {
 
   readonly #signal = new SimpleSignal();
@@ -88,12 +64,13 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
   rendering?: Promise<void>;
   createVNode: CreateVNodeFn;
 
-  continueFlag?: () => boolean;
   isDestroyable = false;
 
   destroyed = false;
 
-  instance: ComponentInstanceMap<P> = new Map();
+  functionComponentInstances: TransformInstanceMap = new Map();
+  functionComponentInstanceIndex: TransformInstanceMapIndex = new Map();
+  classComponentInstances: ComponentInstanceMap<P> = new Map();
   source: () => unknown;
   yielded: boolean;
 
@@ -192,4 +169,37 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
     return super.close();
   }
 
+  getInstance(source: Function, create: () => DOMNativeVNode): DOMNativeVNode {
+    const indexCounter = this.functionComponentInstanceIndex.get(source) ?? new Counter();
+    this.functionComponentInstanceIndex.set(source, indexCounter);
+    indexCounter.next();
+    const { index } = indexCounter;
+    const currentInstances = this.functionComponentInstances.get(source) ?? [];
+    if (currentInstances[index]) {
+      return currentInstances[index];
+    }
+    const nextInstance = create();
+    currentInstances[index] = nextInstance;
+    this.functionComponentInstances.set(source, currentInstances);
+    return nextInstance;
+  }
+}
+
+type TransformInstanceMap = Map<Function, DOMNativeVNode[]>;
+type TransformInstanceMapIndex = Map<Function, Counter>;
+
+class Counter {
+  #index = -1;
+  constructor() {
+    this.reset();
+  }
+  get index() {
+    return this.#index;
+  }
+  reset() {
+    this.#index = -1;
+  }
+  next() {
+    return this.#index += 1;
+  }
 }

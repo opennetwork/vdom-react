@@ -15,7 +15,7 @@ describe("Basic", function () {
         );
     });
 
-    it ("allows state to be set", async () => {
+    it("allows state to be set", async () => {
         function Component() {
             const [state, setState] = useState<string>("Default");
             const onClick = useCallback(() => {
@@ -48,7 +48,7 @@ describe("Basic", function () {
 
     it("allows interval to set state", async () => {
 
-        const values = Array.from({ length: 3 + Math.floor(Math.random() * 20) }, () => `${Math.random()}`);
+        const values = Array.from({ length: 3 }, () => `${Math.random()}`);
         const lastValue = values[values.length - 1];
         function Component() {
             const [state, setState] = useState<string>("Default");

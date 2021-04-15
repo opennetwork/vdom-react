@@ -5,6 +5,9 @@ import {
   Fragment
 } from "react";
 
+function Test() {
+  return createElement("span", {}, "Hello");
+}
 
 function Component() {
   return createElement(
@@ -21,7 +24,8 @@ function Component() {
     ),
     createElement("footer", {},
       createElement("p", {}, new Date().getFullYear()),
-    )
+    ),
+    createElement(Test)
   );
 }
 

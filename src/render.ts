@@ -70,7 +70,6 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
         try {
           renderResult = await render(context);
         } catch (error) {
-          console.log({ error });
           if (await onError(error)) {
             break;
           }
@@ -95,12 +94,27 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
             yield [];
           } else {
             assertReactElement(latestValue);
+
+            for (const counter of context.functionComponentInstanceIndex.values()) {
+              counter.reset();
+            }
+
             yield *flatten(transform({
               actions: dispatcher.actions,
               createVNode: context.createVNode,
               options: context.createChildRenderContextOptions(childrenOptions),
-              element: latestValue
+              element: latestValue,
+              getInstance: context.getInstance.bind(context)
             }));
+
+            // for (const [source, counter] of context.functionComponentInstanceIndex.entries()) {
+            //   const { index } = counter;
+            //   if (index > -1) {
+            //     continue;
+            //   }
+            //   context.functionComponentInstances.delete(source);
+            //   context.functionComponentInstanceIndex.delete(source);
+            // }
           }
         }
         if (!thrownPromise) {
