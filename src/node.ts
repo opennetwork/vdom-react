@@ -21,7 +21,7 @@ export function createVNode(node: VNode, options: CreateRenderContextOptions): D
   if (isReactElement(node.source) && typeof node.source.type === "function") {
     return createVNode(
       {
-        reference: node.source.key || Fragment,
+        reference: Fragment,
         source: node.source.type,
         options: node.source.props
       },

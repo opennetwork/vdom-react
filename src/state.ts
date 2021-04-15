@@ -16,7 +16,7 @@ export interface State<Value = void> extends StateContainer<Value>, AsyncIterabl
 }
 let globalStateIndex = -1;
 
-export function createState<Value = void>(initialValue: Value = undefined, stateChanges?: Collector<State<Value>>): State<Value> {
+export function createState<Value = void, Context = void>(initialValue: Value = undefined, stateChanges?: Collector<[Context, State<Value>]>, context?: Context): State<Value> {
   let defer = deferred<[NeverEndingPromise]>();
   let symbol = Symbol(globalStateIndex);
   let value = initialValue;
@@ -42,7 +42,7 @@ export function createState<Value = void>(initialValue: Value = undefined, state
       const nextDefer = deferred<[NeverEndingPromise]>();
       defer.resolve([nextDefer.promise]);
       defer = nextDefer;
-      stateChanges?.add(state);
+      stateChanges?.add([context, state]);
     },
     async *[Symbol.asyncIterator]() {
       let yielded;

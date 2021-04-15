@@ -46,10 +46,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
     thrownPromise = false;
 
     const renderingProps = context.currentProps;
-    const renderingState: StateContainer = {
-      symbol: context.currentState.symbol,
-      value: context.currentState.value
-    };
+    const renderingState: StateContainer = context.currentState.container;
 
     renderMeta = {
       parent,
@@ -60,7 +57,6 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
       previousProps: renderedProps
     };
 
-    console.log({ yielded: context.yielded });
     if (renderedState.symbol !== renderingState.symbol || !context.yielded) {
       try {
         if (!(await controller?.beforeRender?.(context, renderMeta) ?? true)) break;
@@ -70,6 +66,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
         try {
           renderResult = await render(context);
         } catch (error) {
+          console.log({ error });
           if (await onError(error)) {
             break;
           }
@@ -79,6 +76,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
             context.rendering = undefined;
           }
         }
+        console.log({ renderResult, yielded: context.yielded });
         if (renderResult) {
           const [latestValue, childrenOptions] = renderResult;
           if (!dispatcher.hooked) {
@@ -107,14 +105,14 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
               getInstance: context.getInstance.bind(context)
             }));
 
-            // for (const [source, counter] of context.functionComponentInstanceIndex.entries()) {
-            //   const { index } = counter;
-            //   if (index > -1) {
-            //     continue;
-            //   }
-            //   context.functionComponentInstances.delete(source);
-            //   context.functionComponentInstanceIndex.delete(source);
-            // }
+            for (const [source, counter] of context.functionComponentInstanceIndex.entries()) {
+              const { index } = counter;
+              if (index > -1) {
+                continue;
+              }
+              context.functionComponentInstances.delete(source);
+              context.functionComponentInstanceIndex.delete(source);
+            }
           }
         }
         if (!thrownPromise) {

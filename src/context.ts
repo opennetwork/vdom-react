@@ -20,7 +20,7 @@ export interface RenderContextOptions extends DOMRenderOptions {
   rendered?(details: RenderDetails): Promise<void> | void;
   actions?: Collector<DeferredAction>;
   parent?: RenderContext;
-  stateChanges?: Collector<State>;
+  stateChanges?: Collector<[RenderContext, State]>;
   maxIterations?: number;
   contextMap: ReactContextMap;
   // Returns false if error should be ignored, or true to throw it further
@@ -76,6 +76,10 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
 
   children = new Set<RenderContext>();
 
+  get nodes() {
+    return [...this.#nodes];
+  }
+
   get hooked() {
     if (this.dispatcher.hooked) {
       return true;
@@ -119,6 +123,7 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
       contextMap: options.contextMap,
       actions: options.actions,
       stateChanges: options.stateChanges,
+      renderContext: this,
     });
     this.actions = this.dispatcher.actions;
     this.actionsIterator = this.actions[Symbol.asyncIterator]();

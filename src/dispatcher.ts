@@ -25,6 +25,7 @@ import { isReactContext, isSetStateFn } from "./type-guards";
 import { noop } from "./noop";
 import { Collector } from "microtask-collector";
 import { createState, State } from "./state";
+import { RenderContext } from "./context";
 
 export interface ReactContextDescriptor<T = unknown> {
   currentValue: T;
@@ -33,7 +34,8 @@ export interface ReactContextDescriptor<T = unknown> {
 export interface DispatcherContext {
   readonly actions?: DeferredActionCollector;
   readonly contextMap?: Map<unknown, ReactContextDescriptor>;
-  readonly stateChanges: Collector<State>;
+  readonly stateChanges: Collector<[RenderContext, State]>;
+  readonly renderContext: RenderContext;
 }
 
 export interface Dispatcher extends ReactDispatcher, WorkInProgressContext, DispatcherContext {
@@ -47,7 +49,7 @@ export interface Dispatcher extends ReactDispatcher, WorkInProgressContext, Disp
 
 export function createReactDispatcher(context: DispatcherContext) {
   let componentUpdateQueue: FunctionComponentUpdateQueue | undefined = undefined;
-  const state = createState<void>(undefined, context.stateChanges);
+  const state = createState(undefined, context.stateChanges, context.renderContext);
   const dispatcher: Dispatcher = {
     ...createWorkInProgressContext(),
     ...context,

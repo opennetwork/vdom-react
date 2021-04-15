@@ -22,7 +22,7 @@ interface RenderDetails {
 interface RenderOptions {
   rendered?(details: RenderDetails): Promise<void> | void;
   actions?: Collector<DeferredAction>;
-  stateChanges?: Collector<State>;
+  stateChanges?: Collector<[RenderContext, State]>;
   context?: RenderContext;
   maxIterations?: number;
 }
@@ -35,7 +35,7 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   const actions = options.actions ?? new Collector<DeferredAction>({
     eagerCollection: true
   });
-  const stateChanges = options.stateChanges ?? new Collector<State>({
+  const stateChanges = options.stateChanges ?? new Collector<[RenderContext, State]>({
     eagerCollection: true
   });
   const stateChangeIterator = stateChanges[Symbol.asyncIterator]();
@@ -57,11 +57,12 @@ export async function renderAsync(element: ReactElement, root: Element, options:
 
   const initialNativeNode = createVNodeFromElement(element);
 
-  const rootQueue: DOMNativeVNode[] = [
-    initialNativeNode
+  let rootQueue: [RenderContext, DOMNativeVNode][] = [
+    [context, initialNativeNode]
   ];
 
-  let rootNativeNode: DOMNativeVNode | undefined;
+  let rootNativeNode: DOMNativeVNode,
+    rootContext: RenderContext;
 
   let remainingIterations = options.maxIterations;
 
@@ -72,9 +73,9 @@ export async function renderAsync(element: ReactElement, root: Element, options:
         remainingIterations -= 1;
       }
 
-      rootNativeNode = rootQueue.shift();
+      [rootContext, rootNativeNode] = rootQueue.shift();
 
-      await hydrate(context, rootNativeNode);
+      await hydrate(rootContext, rootNativeNode);
 
       await options.rendered?.({
         remainingRootsToFlush: rootQueue.length
@@ -86,13 +87,17 @@ export async function renderAsync(element: ReactElement, root: Element, options:
         break;
       }
 
+      if (rootQueue.length) {
+        continue;
+      }
+
       const { done, value } = await stateChangeIterator.next();
 
-      console.log({ done, value: value.map((value: StateContainer) => value.symbol), context: value.map((value: State) => states.get(value)) });
+      console.log({ done, value: value.map(([renderContext, state]: [RenderContext, StateContainer]) => [renderContext, state.symbol]) });
 
       if (done) break;
 
-      rootQueue.push(rootNativeNode);
+      rootQueue = rootQueue.concat(value.flatMap(([renderContext]: [RenderContext]) => renderContext.nodes.map((node): [RenderContext, DOMNativeVNode] => [renderContext, node])));
     } while (rootQueue.length && !caughtError && (typeof remainingIterations !== "number" || remainingIterations > 0));
   } catch (error) {
     caughtError = caughtError ?? error;
