@@ -40,39 +40,7 @@ export function createVNode(node: VNode, options: CreateRenderContextOptions): D
   assertFragment(reference);
 
   const renderContext = options.createChildContext(source, props);
-  const controller = renderContext.controller;
 
-  let latestChildren: DOMNativeVNode[] | undefined = undefined;
-  return renderContext.getInstance(
-    source,
-    () => {
-      const native = Native(
-        {
-          source
-        },
-        {
-          reference: Fragment,
-          children: {
-            async *[Symbol.asyncIterator]() {
-              if (renderContext.isDestroyable || renderContext.destroyed) {
-                return;
-              }
-              let yielded = false;
-              for await (const nextChildren of renderGenerator(renderContext)) {
-                latestChildren = nextChildren;
-                yield nextChildren;
-                yielded = renderContext.yielded = true;
-              }
-              if (!yielded && renderContext.yielded && latestChildren) {
-                yield latestChildren;
-              }
-            }
-          }
-        }
-      );
-      controller?.hello?.(renderContext, native);
-      return native;
-    }
-  );
+  return Native({}, renderContext);
 }
 

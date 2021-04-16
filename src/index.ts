@@ -82,8 +82,6 @@ export async function renderAsync(element: ReactElement, root: Element, options:
       });
 
       if (!context.hooked || remainingIterations === 0) {
-        // const state = { previousState: tree.children[0].context.previousState, currentState: tree.children[0].context.currentState };
-        // console.log("None hooked", tree.children[0], state);
         break;
       }
 
@@ -93,11 +91,14 @@ export async function renderAsync(element: ReactElement, root: Element, options:
 
       const { done, value } = await stateChangeIterator.next();
 
-      console.log({ done, value: value.map(([renderContext, state]: [RenderContext, StateContainer]) => [renderContext, state.symbol]) });
-
       if (done) break;
 
-      rootQueue = rootQueue.concat(value.flatMap(([renderContext]: [RenderContext]) => renderContext.nodes.map((node): [RenderContext, DOMNativeVNode] => [renderContext, node])));
+      rootQueue = rootQueue
+        .concat(
+          value.flatMap(([renderContext]: [RenderContext]) => renderContext.nodes
+            .map((node): [RenderContext, DOMNativeVNode] => [renderContext, node])
+          )
+        );
     } while (rootQueue.length && !caughtError && (typeof remainingIterations !== "number" || remainingIterations > 0));
   } catch (error) {
     caughtError = caughtError ?? error;

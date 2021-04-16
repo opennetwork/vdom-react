@@ -1,15 +1,17 @@
 import type { RenderOptions as DOMRenderOptions } from "@opennetwork/vdom";
+import { DOMNativeVNode, DOMVContext, ElementDOMNativeVNode, Native } from "@opennetwork/vdom";
 import type { Tree, VNode } from "@opennetwork/vnode";
-import { DOMNativeVNode, DOMVContext, ElementDOMNativeVNode } from "@opennetwork/vdom";
+import { Fragment, NativeVNode } from "@opennetwork/vnode";
 import { SimpleSignal } from "./cancellable";
 import type { Controller, RenderMeta } from "./controller";
 import { Collector } from "microtask-collector";
 import { DeferredAction, DeferredActionIterator } from "./queue";
 import { createState, State, StateContainer } from "./state";
 import { ReactContextMap } from "./node";
-import { createReactDispatcher, Dispatcher } from "./dispatcher";
+import { createReactDispatcher } from "./dispatcher";
 import { ComponentInstanceMap } from "./component";
 import { CreateVNodeFn as CreateVNodeFnPrototype } from "@opennetwork/vnode/dist/create-node";
+import { renderGenerator } from "./render";
 
 interface RenderDetails {
   remainingRootsToFlush?: number;
@@ -43,12 +45,24 @@ export interface CreateVNodeFn extends CreateVNodeFnPrototype<CreateRenderContex
 
 export type CreateVNodeFnCatch<Fn extends CreateVNodeFn> = Fn;
 
-export class RenderContext<P = unknown> extends DOMVContext implements RenderContext<P> {
+export interface RenderVNode extends VNode {
+  children: AsyncIterable<ElementDOMNativeVNode[]>;
+}
+
+export class RenderContext<P = unknown> extends DOMVContext implements RenderContext<P>, RenderVNode {
+
+  readonly reference: typeof Fragment = Fragment;
 
   readonly #signal = new SimpleSignal();
   readonly #promise;
 
   readonly #nodes = new Set<DOMNativeVNode>();
+
+  #snapshot: ElementDOMNativeVNode[] | undefined;
+
+  get snapshot() {
+    return this.#snapshot;
+  }
 
   dispatcher;
   actionsIterator: DeferredActionIterator;
@@ -72,9 +86,9 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
   functionComponentInstanceIndex: TransformInstanceMapIndex = new Map();
   classComponentInstances: ComponentInstanceMap<P> = new Map();
   source: () => unknown;
-  yielded: boolean;
+  yielded = false;
 
-  children = new Set<RenderContext>();
+  contexts = new Set<RenderContext>();
 
   get nodes() {
     return [...this.#nodes];
@@ -84,7 +98,7 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
     if (this.dispatcher.hooked) {
       return true;
     }
-    for (const child of this.children) {
+    for (const child of this.contexts) {
       if (child.hooked) {
         return true;
       }
@@ -131,6 +145,8 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
     this.currentState = this.dispatcher.state;
     this.previousState = createState().container;
     this.source = options.source;
+
+    this.hello(this, Native({}, this));
   }
 
   createChildRenderContextOptions(options: Partial<RenderContextOptions>): CreateRenderContextOptions {
@@ -156,7 +172,7 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
       ...options,
       parent: this
     });
-    this.children.add(context);
+    this.contexts.add(context);
     return context;
   }
 
@@ -188,6 +204,34 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
     this.functionComponentInstances.set(source, currentInstances);
     return nextInstance;
   }
+
+  get children() {
+    const renderContext = this;
+    const setSnapshot = (snapshot: ElementDOMNativeVNode[]) => {
+      this.#snapshot = snapshot;
+    };
+
+    return {
+      [Symbol.asyncIterator]: generator
+    };
+
+    async function *generator() {
+      if (renderContext.isDestroyable || renderContext.destroyed) {
+        return;
+      }
+      let yielded = false;
+      for await (const nextChildren of renderGenerator(renderContext)) {
+        setSnapshot(nextChildren);
+        yield nextChildren;
+        yielded = renderContext.yielded = true;
+      }
+      const snapshot = renderContext.snapshot;
+      if (!yielded && renderContext.yielded && snapshot) {
+        yield snapshot;
+      }
+    }
+  }
+
 }
 
 type TransformInstanceMap = Map<Function, DOMNativeVNode[]>;

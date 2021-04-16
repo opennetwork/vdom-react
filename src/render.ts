@@ -76,7 +76,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
             context.rendering = undefined;
           }
         }
-        console.log({ renderResult, yielded: context.yielded });
+        console.log({ renderResult, yielded: context.yielded, thrownPromise });
         if (renderResult) {
           const [latestValue, childrenOptions] = renderResult;
           if (!dispatcher.hooked) {
