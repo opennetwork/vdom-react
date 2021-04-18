@@ -37,7 +37,7 @@ class ErrorBoundary extends ReactComponent {
 
     setTimeout(() => {
       this.setState({ hasError: false });
-    }, 2000)
+    }, 200)
   }
 
   render() {
@@ -63,7 +63,7 @@ function A() {
   const [isLoaded, setIsLoaded] = useState(false);
 
   const promise = useMemo(async () => {
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    await new Promise(resolve => setTimeout(resolve, 200));
     setIsLoaded(true);
     console.log("Promise finished");
   }, [setIsLoaded]);
@@ -141,10 +141,17 @@ process.on("warning", console.log.bind("warning"))
 
 try {
   await render(createElement(Component), dom.window.document.body, {
-    rendered() {
-      console.log(window.document.body.outerHTML)
-    }
+    onContext(context) {
+      (async () => {
+        for await (const events of context.events.hydrate) {
+          console.log(window.document.body.outerHTML)
+        }
+      })()
+        .catch(console.error);
+    },
+    settleAfterTimeout: 2000
   });
+  console.log(window.document.body.outerHTML)
   console.log("Finished rendering");
 } catch (e) {
   console.error(e);

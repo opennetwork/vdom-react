@@ -2,6 +2,7 @@ import { renderAsync } from "../index";
 import { useCallback, useEffect, useState } from "react";
 import { screen } from "@testing-library/dom";
 import userEvent from "@testing-library/user-event";
+import { noop } from "../noop";
 
 describe("Basic", function () {
     it("renders static", async () => {
@@ -37,7 +38,9 @@ describe("Basic", function () {
                         clicked = true;
                     }
                 },
-                maxIterations: 2
+                maxIterations: 2,
+                settleAfterTimeout: 200,
+                promise: noop
             }
         );
 
@@ -47,6 +50,8 @@ describe("Basic", function () {
     });
 
     it("allows interval to set state", async () => {
+
+        debugger;
 
         const values = Array.from({ length: 3 }, () => `${Math.random()}`);
         const lastValue = values[values.length - 1];

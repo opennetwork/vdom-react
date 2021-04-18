@@ -6,6 +6,7 @@ import { Collector } from "microtask-collector";
 import { RenderContext } from "./context";
 import { DeferredAction, DeferredActionCollector, DeferredActionIteratorResult } from "./queue";
 import { State, StateContainer } from "./state";
+import { deferred } from "./deferred";
 
 export type {
   DOMNativeVNode,
@@ -13,18 +14,23 @@ export type {
 };
 
 const contexts = new WeakMap<Element, RenderContext>();
-const states = new WeakMap<State, RenderContext>();
 
-interface RenderDetails {
-  remainingRootsToFlush?: number;
+interface SettleFn {
+  (fn: () => void): void;
 }
 
 interface RenderOptions {
-  rendered?(details: RenderDetails): Promise<void> | void;
+  rendered?(details: unknown): Promise<void> | void;
   actions?: Collector<DeferredAction>;
   stateChanges?: Collector<[RenderContext, State]>;
   context?: RenderContext;
+  onContext?(context: RenderContext): Promise<void> | void;
   maxIterations?: number;
+  settleAfterMicrotasks?: number;
+  settleAfterMacrotask?: boolean;
+  settleAfterTimeout?: number;
+  settle?: SettleFn;
+  promise?(promise: Promise<unknown>): void;
 }
 
 export function render(node: ReactElement, root: Element, options: RenderOptions = {}): unknown {
@@ -32,6 +38,10 @@ export function render(node: ReactElement, root: Element, options: RenderOptions
 }
 
 export async function renderAsync(element: ReactElement, root: Element, options: RenderOptions = {}): Promise<[DOMNativeVNode, RenderContext]> {
+  const doneDeferred = deferred();
+  let done = false;
+
+  const settle = getSettle();
   const actions = options.actions ?? new Collector<DeferredAction>({
     eagerCollection: true
   });
@@ -45,74 +55,65 @@ export async function renderAsync(element: ReactElement, root: Element, options:
     stateChanges,
     contextMap: new Map(),
     errorBoundary: onAnyError,
-    promise: unknownPromise,
+    promise: knownPromise,
     createVNode,
     root
   });
   contexts.set(root, context);
+  if (options.onContext) {
+    await options.onContext(context);
+  }
 
   let caughtError: unknown = undefined;
   const promises = new Set<Promise<unknown>>();
-  let accumulativePromise: Promise<void> | undefined = wait(actions);
-
   const initialNativeNode = createVNodeFromElement(element);
-
-  let rootQueue: [RenderContext, DOMNativeVNode][] = [
-    [context, initialNativeNode]
-  ];
-
-  let rootNativeNode: DOMNativeVNode,
-    rootContext: RenderContext;
-
-  let remainingIterations = options.maxIterations;
-
   try {
-    // Hydrate at least once no matter what
-    do {
-      if (remainingIterations) {
-        remainingIterations -= 1;
-      }
-
-      [rootContext, rootNativeNode] = rootQueue.shift();
-
-      await hydrate(rootContext, rootNativeNode);
-
-      await options.rendered?.({
-        remainingRootsToFlush: rootQueue.length
-      });
-
-      if (!context.hooked || remainingIterations === 0) {
-        break;
-      }
-
-      if (rootQueue.length) {
-        continue;
-      }
-
-      const { done, value } = await stateChangeIterator.next();
-
-      if (done) break;
-
-      rootQueue = rootQueue
-        .concat(
-          value.flatMap(([renderContext]: [RenderContext]) => renderContext.nodes
-            .map((node): [RenderContext, DOMNativeVNode] => [renderContext, node])
-          )
-        );
-    } while (rootQueue.length && !caughtError && (typeof remainingIterations !== "number" || remainingIterations > 0));
+    await hydrate(context, initialNativeNode);
   } catch (error) {
     caughtError = caughtError ?? error;
+    console.log({ caughtError });
   } finally {
-    await context.close();
-    await accumulativePromise;
-    await Promise.all(promises);
+    console.log("finally");
+    try {
+      while (promises.size) {
+        console.log("promises");
+        if (settle) {
+          const shouldBreak = await Promise.any([
+            Promise.all(promises).then(() => false),
+            runSettle()
+          ]);
+          if (shouldBreak) {
+            break;
+          }
+        } else {
+          await Promise.all(promises);
+        }
+      }
+      console.log("context.close");
+      await context.close();
+      done = true;
+      doneDeferred.resolve();
+    } catch (e) {
+      console.error(e);
+    }
   }
 
+  console.log("finished");
+
   if (caughtError) {
+    console.log({ caughtError });
     throw caughtError;
   }
 
-  return [rootNativeNode, context];
+  return [initialNativeNode, context];
+
+  function getNodes(contexts: RenderContext[]) {
+    return contexts.flatMap(
+      (renderContext: RenderContext) =>
+        renderContext.nodes
+          .map((node): [RenderContext, DOMNativeVNode] => [renderContext, node])
+    );
+  }
 
   function createVNodeFromElement(element: ReactElement) {
     return createVNode(
@@ -121,21 +122,45 @@ export async function renderAsync(element: ReactElement, root: Element, options:
     );
   }
 
-  async function wait(queue: DeferredActionCollector) {
-    try {
-      const iterator = queue[Symbol.asyncIterator]();
-      let result: DeferredActionIteratorResult;
-      do {
-        result = await iterator.next();
-        if (!result.done && Array.isArray(result.value)) {
-          result.value.forEach(onDeferredAction);
-        }
-      } while (!result.done && !caughtError);
-    } catch (error) {
-      caughtError = caughtError ?? error;
-    } finally {
-      accumulativePromise = undefined;
+  function hasChanged(context: RenderContext): boolean {
+    if (context.source && context.previousState.symbol !== context.currentState.symbol) {
+      return true;
     }
+    return [...context.contexts].some(hasChanged);
+  }
+
+  // function getChanged(context: RenderContext): RenderContext[] {
+  //   if (context.source && context.previousState.symbol !== context.currentState.symbol) {
+  //     return [context];
+  //   }
+  //   return [...context.contexts].flatMap(getChanged);
+  // }
+
+  async function wait(queue: DeferredActionCollector, iterator = queue[Symbol.asyncIterator]()) {
+    // let result: DeferredActionIteratorResult;
+    // try {
+    //   do {
+    //     result = await Promise.any<DeferredActionIteratorResult>([
+    //       iterator.next(),
+    //       doneDeferred.promise.then((): DeferredActionIteratorResult => ({ done: true, value: undefined }))
+    //     ]);
+    //     if (!result.done && Array.isArray(result.value)) {
+    //       result.value.forEach(onDeferredAction);
+    //     }
+    //   } while (!result.done && !caughtError && !done);
+    // } catch (error) {
+    //   caughtError = caughtError ?? error;
+    // } finally {
+    //   accumulativePromise = undefined;
+    // }
+    //
+    // if (result.done && !done) {
+    //   const nextIterator = queue[Symbol.asyncIterator]();
+    //   knownPromise((async () => {
+    //     await new Promise<void>(actions.queueMicrotask);
+    //     await wait(queue, nextIterator);
+    //   })());
+    // }
   }
 
   function onDeferredAction(action: DeferredAction) {
@@ -149,7 +174,7 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   }
 
   function unknownPromise(promise: Promise<unknown>) {
-    actions.add(() => promise);
+    promise.catch(onAnyError);
   }
 
   function onAnyError(error: unknown) {
@@ -158,6 +183,9 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   }
 
   function knownPromise(promise: Promise<unknown>) {
+    if (options.promise) {
+      return options.promise(promise);
+    }
     promises.add(promise);
     promise.then(onResolve, onError);
     function onError(error: unknown) {
@@ -167,5 +195,37 @@ export async function renderAsync(element: ReactElement, root: Element, options:
     function onResolve() {
       promises.delete(promise);
     }
+  }
+
+  async function runSettle(): Promise<true> {
+    await new Promise<void>(settle);
+    return true;
+  }
+
+  function getSettle(): SettleFn | undefined {
+    if (options.settle) {
+      return options.settle;
+    }
+    if (options.settleAfterTimeout ?? options.settleAfterMacrotask) {
+      return (fn) => setTimeout(fn, options.settleAfterTimeout ?? 0);
+    }
+    const initialMicrotasks = options.settleAfterMicrotasks;
+    if (initialMicrotasks) {
+      return (fn) => {
+        let remainingMicrotasks = initialMicrotasks;
+        next();
+        function next() {
+          queueMicrotask(() => {
+            remainingMicrotasks -= 1;
+            if (remainingMicrotasks > 0) {
+              next();
+            } else {
+              fn();
+            }
+          });
+        }
+      };
+    }
+    return undefined;
   }
 }

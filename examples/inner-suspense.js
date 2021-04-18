@@ -21,7 +21,10 @@ function Component() {
 }
 
 await render(createElement(Component), dom.window.document.body, {
-  settleAfterMacrotask: true
+  rendered: () => {
+    console.log(dom.window.document.body.outerHTML);
+  },
+  maxIterations: 2
 });
 
 console.log("Complete");

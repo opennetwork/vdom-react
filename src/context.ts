@@ -1,12 +1,12 @@
 import type { RenderOptions as DOMRenderOptions } from "@opennetwork/vdom";
 import { DOMNativeVNode, DOMVContext, ElementDOMNativeVNode, Native } from "@opennetwork/vdom";
 import type { Tree, VNode } from "@opennetwork/vnode";
-import { Fragment, NativeVNode } from "@opennetwork/vnode";
+import { Fragment, hydrateChildren } from "@opennetwork/vnode";
 import { SimpleSignal } from "./cancellable";
 import type { Controller, RenderMeta } from "./controller";
 import { Collector } from "microtask-collector";
 import { DeferredAction, DeferredActionIterator } from "./queue";
-import { createState, State, StateContainer } from "./state";
+import { State, StateContainer } from "./state";
 import { ReactContextMap } from "./node";
 import { createReactDispatcher } from "./dispatcher";
 import { ComponentInstanceMap } from "./component";
@@ -65,7 +65,16 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
   }
 
   dispatcher;
-  actionsIterator: DeferredActionIterator;
+  #actionsIterator: DeferredActionIterator;
+
+  get actionsIterator() {
+    return this.#actionsIterator;
+  }
+
+  set actionsIterator(value: DeferredActionIterator | undefined) {
+    this.#actionsIterator = value ?? this.actions[Symbol.asyncIterator]();
+  }
+
   actions;
 
   options: RenderSourceContextOptions;
@@ -114,8 +123,9 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
     this.#nodes.add(node);
   }
 
-  willContinue?(renderContext: RenderContext, meta: RenderMeta) {
-    return false;
+  willContinue?(renderContext: RenderContext, meta: RenderMeta);
+  willContinue?() {
+    return !!this.options.promise;
   }
 
   beforeRender?(renderContext: RenderContext, meta: RenderMeta): boolean | Promise<boolean>;
@@ -143,10 +153,15 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
     this.actionsIterator = this.actions[Symbol.asyncIterator]();
     this.createVNode = options.createVNode;
     this.currentState = this.dispatcher.state;
-    this.previousState = createState().container;
+    this.previousState = {
+      ...this.dispatcher.state.container,
+      symbol: Symbol("Initial")
+    };
     this.source = options.source;
 
-    this.hello(this, Native({}, this));
+    if (this.source) {
+      this.hello(this, Native({}, this));
+    }
   }
 
   createChildRenderContextOptions(options: Partial<RenderContextOptions>): CreateRenderContextOptions {
@@ -178,6 +193,19 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
 
   hydrate(node: VNode, tree?: Tree): Promise<void> {
     return super.hydrate(node, tree);
+  }
+
+  async commitChildren(documentNode: Element, node: VNode, tree?: Tree) {
+
+    const { promise } = this.options;
+    const resultPromise = hydrateChildren(this.childContext(documentNode), node, tree);
+
+    if (!promise) {
+      await resultPromise;
+    } else {
+      promise(resultPromise, node, tree);
+    }
+
   }
 
   async close() {

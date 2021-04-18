@@ -2,6 +2,7 @@ import { renderAsync } from "../../index";
 import { screen } from "@testing-library/dom";
 import userEvent from "@testing-library/user-event";
 import { useMemo, useRef, useState } from "react";
+import { noop } from "../../noop";
 
 function useAsync<T>(fn: () => Promise<T>, deps?: unknown[]): T {
   const [loaded, setLoaded] = useState(false);
@@ -45,7 +46,8 @@ describe("useAsync Suspense", function () {
       <Component />,
       document.body,
       {
-        maxIterations: 2
+        settleAfterTimeout: 20,
+        promise: noop
       }
     );
 

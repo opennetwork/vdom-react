@@ -11,7 +11,7 @@
         ],
         "esModuleInterop": true,
         "target": "esnext",
-        "noImplicitAny": true,
+        "noImplicitAny": false,
         "downlevelIteration": true,
         "moduleResolution": "node",
         "sourceMap": true,
@@ -24,7 +24,7 @@
             ]
         },
         "jsx": "react-jsx",
-        "allowJs": true
+        "allowJs": true,
     },
     "include": [
         "src/**/*",

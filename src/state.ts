@@ -4,6 +4,7 @@ import { Collector } from "microtask-collector";
 export interface StateContainer<Value = void> {
   readonly symbol: symbol;
   readonly value: Value;
+  readonly promise: NeverEndingPromise;
 }
 
 // Wrap the result as a tuple so that it isn't resolved automatically
@@ -33,12 +34,13 @@ export function createState<Value = void, Context = void>(initialValue: Value = 
     get container() {
       return {
         symbol,
-        value
+        value,
+        promise: defer.promise
       };
     },
-    change(nextValue: Value) {
+    change(nextValue: Value, nextSymbol: symbol = Symbol(globalStateIndex += 1)) {
       value = nextValue;
-      symbol = Symbol(globalStateIndex += 1);
+      symbol = nextSymbol;
       const nextDefer = deferred<[NeverEndingPromise]>();
       defer.resolve([nextDefer.promise]);
       defer = nextDefer;

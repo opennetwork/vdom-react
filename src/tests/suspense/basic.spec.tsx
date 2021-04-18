@@ -1,16 +1,17 @@
 import { renderAsync } from "../../index";
 import { screen } from "@testing-library/dom";
 import { useRef } from "react";
+import { noop } from "../../noop";
 
 describe("Basic Suspense", function () {
     it("renders after promise", async () => {
 
-        const promise = Promise.resolve();
         function Component() {
             const thrown = useRef(false);
+            console.log({ thrownComponent: thrown });
             if (!thrown.current) {
                 thrown.current = true;
-                throw promise;
+                throw Promise.resolve();
             }
             return <p data-testid="result">Rendered!</p>;
         }
@@ -19,7 +20,8 @@ describe("Basic Suspense", function () {
             <Component />,
             document.body,
             {
-                maxIterations: 2
+                settleAfterMacrotask: true,
+                promise: noop
             }
         );
 
@@ -28,18 +30,18 @@ describe("Basic Suspense", function () {
     });
 
     it ("works with an inner component", async () => {
-        const promise = Promise.resolve();
         function Inner() {
             const thrown = useRef(false);
+            console.log({ thrownInner: thrown });
             if (!thrown.current) {
                 thrown.current = true;
-                throw promise;
+                throw Promise.resolve();
             }
             return <p data-testid="result">Rendered!</p>;
         }
 
         function Component() {
-            // Trigger gook functionality for component
+            // Trigger hook functionality for component
             useRef();
             return <Inner />;
         }
@@ -48,7 +50,8 @@ describe("Basic Suspense", function () {
             <Component />,
             document.body,
             {
-                maxIterations: 2
+                settleAfterMacrotask: true,
+                promise: noop
             }
         );
 

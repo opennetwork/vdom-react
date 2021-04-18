@@ -35,11 +35,8 @@ process.on("unhandledRejection", console.log.bind("unhandledRejection"))
 process.on("warning", console.log.bind("warning"))
 
 try {
-  await render(createElement(Component), dom.window.document.body, {
-    rendered() {
-      console.log(window.document.body.outerHTML)
-    }
-  });
+  await render(createElement(Component), dom.window.document.body);
+  console.log(window.document.body.outerHTML)
   console.log("Finished rendering");
 } catch (e) {
   console.error(e);

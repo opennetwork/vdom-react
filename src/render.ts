@@ -5,10 +5,10 @@ import { isAbortLifecycleError } from "./lifecycle";
 import { createVNode as createBasicVNode } from "@opennetwork/vnode";
 import { assertReactElement, isReactComponentClass } from "./type-guards";
 import { transform } from "./transform";
-import { isPromise } from "iterable";
+import { isPromise, source } from "iterable";
 import { renderComponent } from "./component";
 import { renderFunction } from "./function";
-import type { StateContainer } from "./state";
+import type { NeverEndingPromise, StateContainer } from "./state";
 import {
   ElementDOMNativeVNode,
   Native,
@@ -34,7 +34,8 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
     renderedProps = context.previousProps,
     renderMeta: RenderMeta,
     renderDeferred: Deferred,
-    willContinue: boolean = true;
+    willContinue: boolean = true,
+    stateChangePromise: NeverEndingPromise = renderedState.promise;
 
   let caughtError: unknown;
 
@@ -66,7 +67,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
         try {
           renderResult = await render(context);
         } catch (error) {
-          console.log({ error });
+          // console.log({ theErrorHere: error, source: context.source.name });
           if (await onError(error)) {
             break;
           }
@@ -76,7 +77,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
             context.rendering = undefined;
           }
         }
-        console.log({ renderResult, yielded: context.yielded, thrownPromise });
+        // console.log({ renderResult, yielded: context.yielded, thrownPromise });
         if (renderResult) {
           const [latestValue, childrenOptions] = renderResult;
           if (!dispatcher.hooked) {
@@ -115,9 +116,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
             }
           }
         }
-        if (!thrownPromise) {
-          renderedState = context.previousState = renderingState;
-        }
+        renderedState = context.previousState = renderingState;
         renderedProps = context.previousProps = renderingProps;
       } catch (error) {
         if (await onError(error)) {
@@ -126,12 +125,37 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
       }
       await dispatcher.commitHookEffectList(0);
     }
-    willContinue = (await controller?.willContinue?.(context, renderMeta) ?? false);
-  } while (!context.isDestroyable && (await controller?.afterRender?.(context, renderMeta, willContinue) ?? true) && willContinue && dispatcher.hooked && controller?.aborted !== true && !caughtError);
+    willContinue = (await controller?.willContinue?.(context, renderMeta) ?? false) && willContinueScope();
+    willContinue = (await controller?.afterRender?.(context, renderMeta, willContinue) ?? true) && willContinue;
+
+    if (willContinue) {
+      const next = await actionsIterator.next();
+      if (next.done) {
+        context.actionsIterator = undefined;
+      } else if (next.value) {
+        for (const action of next.value) {
+          try {
+            await action();
+          } catch (error) {
+            if (await onError(error)) {
+              willContinue = false;
+              break;
+            }
+          }
+        }
+      }
+      [stateChangePromise] = await stateChangePromise;
+    }
+  } while (willContinue && willContinueScope());
+
 
   if (caughtError) {
     await close();
     await Promise.reject(caughtError);
+  }
+
+  function willContinueScope(): boolean {
+    return !context.isDestroyable && dispatcher.hooked && controller?.aborted !== true && !caughtError;
   }
 
   async function *flatten(native: DOMNativeVNode): AsyncIterable<ElementDOMNativeVNode[]> {
