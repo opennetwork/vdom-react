@@ -1,5 +1,5 @@
 import { Fragment, VNode } from "@opennetwork/vnode";
-import { DOMNativeVNode, Native } from "@opennetwork/vdom";
+import { NativeVNode, Native } from "@opennetwork/vdom";
 import type { Context as ReactContext, } from "react";
 import { assertFragment, assertFunction, assertProps, isReactElement } from "./type-guards";
 import { renderGenerator } from "./render";
@@ -14,7 +14,7 @@ export type ReactContextMap = Map<ReactContext<unknown>, ReactContextDescriptor>
 // Compile time type guard
 type ThrowAway = CreateVNodeFnCatch<typeof createVNode>;
 
-export function createVNode(node: VNode, options: CreateRenderContextOptions): DOMNativeVNode {
+export function createVNode(node: VNode, options: CreateRenderContextOptions): NativeVNode {
 
   const PROPS_BRAND = Symbol("This object is branded as this components props");
 

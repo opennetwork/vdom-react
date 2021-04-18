@@ -6,7 +6,7 @@ import {
 } from "./type-guards";
 import { Fragment, isSourceReference, VNode } from "@opennetwork/vnode";
 import { Fragment as ReactFragment, ReactElement } from "react";
-import type { DOMNativeVNode, NativeOptionsVNode } from "@opennetwork/vdom";
+import type { NativeVNode, NativeOptionsVNode } from "@opennetwork/vdom";
 import type { createVNode } from "./node";
 import { Native as DOMNative } from "@opennetwork/vdom";
 import { Native } from "./native-node";
@@ -17,10 +17,10 @@ export interface TransformContext {
   actions: DeferredActionCollector;
   element: unknown;
   createVNode: typeof createVNode;
-  getInstance(source: Function, create: () => DOMNativeVNode): DOMNativeVNode;
+  getInstance(source: Function, create: () => NativeVNode): NativeVNode;
 }
 
-export function transform(context: TransformContext): DOMNativeVNode {
+export function transform(context: TransformContext): NativeVNode {
   const node = initialTransform(context);
   return DOMNative(node.options, node);
 }

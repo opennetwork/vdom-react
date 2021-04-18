@@ -1,6 +1,6 @@
 import { MutableRefObject, ReactElement } from "react";
 import {
-  DOMNativeVNode,
+  NativeVNode,
   isElement,
   NativeAttributes,
   NativeOptionsVNode,
@@ -18,7 +18,7 @@ export interface NativeElement extends ReactElement {
   children: AsyncIterable<ReadonlyArray<VNode>>;
 }
 
-export function Native(element: NativeElement): DOMNativeVNode {
+export function Native(element: NativeElement): NativeVNode {
   const { key, type: source, children } = element;
   const node: NativeOptionsVNode = {
     source,

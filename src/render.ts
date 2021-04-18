@@ -1,25 +1,25 @@
 import { isSourceReference, isVNode } from "@opennetwork/vnode";
-import { Controller, RenderMeta } from "./controller";
+import { RenderMeta } from "./controller";
 import { deferred, Deferred } from "./deferred";
 import { isAbortLifecycleError } from "./lifecycle";
 import { createVNode as createBasicVNode } from "@opennetwork/vnode";
 import { assertReactElement, isReactComponentClass } from "./type-guards";
 import { transform } from "./transform";
-import { isPromise, source } from "iterable";
+import { isPromise } from "iterable";
 import { renderComponent } from "./component";
 import { renderFunction } from "./function";
 import type { NeverEndingPromise, StateContainer } from "./state";
 import {
-  ElementDOMNativeVNode,
   Native,
   isFragmentDOMNativeVNode,
-  isElementDOMNativeVNode,
+  isDOMNativeVNode,
+  NativeVNode,
   DOMNativeVNode
 } from "@opennetwork/vdom";
 import { RenderContext, RenderContextOptions } from "./context";
 
 
-export async function *renderGenerator<P>(context: RenderContext<P>): AsyncIterable<ElementDOMNativeVNode[]> {
+export async function *renderGenerator<P>(context: RenderContext<P>): AsyncIterable<DOMNativeVNode[]> {
   const {
     dispatcher,
     parent,
@@ -83,7 +83,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
           if (!dispatcher.hooked) {
             const node = isVNode(latestValue) ? latestValue : isSourceReference(latestValue) ? createBasicVNode(latestValue) : undefined;
             if (node) {
-              const native = (isElementDOMNativeVNode(node) || isFragmentDOMNativeVNode(node)) ? node : Native(node.options, node);
+              const native = (isDOMNativeVNode(node) || isFragmentDOMNativeVNode(node)) ? node : Native(node.options, node);
               yield *flatten(native);
             } else {
               yield [];
@@ -158,12 +158,12 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
     return !context.isDestroyable && dispatcher.hooked && controller?.aborted !== true && !caughtError;
   }
 
-  async function *flatten(native: DOMNativeVNode): AsyncIterable<ElementDOMNativeVNode[]> {
+  async function *flatten(native: NativeVNode): AsyncIterable<DOMNativeVNode[]> {
     if (isFragmentDOMNativeVNode(native)) {
       for await (const elements of native.children) {
         yield elements;
       }
-    } else if (isElementDOMNativeVNode(native)) {
+    } else if (isDOMNativeVNode(native)) {
       yield [native];
     } else {
       throw new Error("Expected FragmentDOMNativeVNode or isElementDOMNativeVNode");

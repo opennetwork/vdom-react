@@ -1,15 +1,15 @@
 import { ReactElement } from "react";
-import { DOMNativeVNode } from "@opennetwork/vdom";
+import { NativeVNode } from "@opennetwork/vdom";
 import { createVNode } from "./node";
 import { Fragment, hydrate } from "@opennetwork/vnode";
 import { Collector } from "microtask-collector";
 import { RenderContext } from "./context";
-import { DeferredAction, DeferredActionCollector, DeferredActionIteratorResult } from "./queue";
-import { State, StateContainer } from "./state";
+import { DeferredAction, DeferredActionCollector } from "./queue";
+import { State } from "./state";
 import { deferred } from "./deferred";
 
 export type {
-  DOMNativeVNode,
+  NativeVNode,
   RenderContext
 };
 
@@ -37,7 +37,7 @@ export function render(node: ReactElement, root: Element, options: RenderOptions
   return renderAsync(node, root, options);
 }
 
-export async function renderAsync(element: ReactElement, root: Element, options: RenderOptions = {}): Promise<[DOMNativeVNode, RenderContext]> {
+export async function renderAsync(element: ReactElement, root: Element, options: RenderOptions = {}): Promise<[NativeVNode, RenderContext]> {
   const doneDeferred = deferred();
   let done = false;
 
@@ -111,7 +111,7 @@ export async function renderAsync(element: ReactElement, root: Element, options:
     return contexts.flatMap(
       (renderContext: RenderContext) =>
         renderContext.nodes
-          .map((node): [RenderContext, DOMNativeVNode] => [renderContext, node])
+          .map((node): [RenderContext, NativeVNode] => [renderContext, node])
     );
   }
 

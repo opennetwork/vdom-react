@@ -1,5 +1,5 @@
 import type { RenderOptions as DOMRenderOptions } from "@opennetwork/vdom";
-import { DOMNativeVNode, DOMVContext, ElementDOMNativeVNode, Native } from "@opennetwork/vdom";
+import { NativeVNode, DOMVContext, DOMNativeVNode, Native } from "@opennetwork/vdom";
 import type { Tree, VNode } from "@opennetwork/vnode";
 import { Fragment, hydrateChildren } from "@opennetwork/vnode";
 import { SimpleSignal } from "./cancellable";
@@ -39,14 +39,14 @@ export interface CreateRenderContextOptions extends RenderContextOptions {
   createChildContext(source: () => unknown, props: unknown): RenderContext;
 }
 
-export interface CreateVNodeFn extends CreateVNodeFnPrototype<CreateRenderContextOptions, VNode, ElementDOMNativeVNode, DOMNativeVNode> {
-  (source: VNode, options: CreateRenderContextOptions): DOMNativeVNode;
+export interface CreateVNodeFn extends CreateVNodeFnPrototype<CreateRenderContextOptions, VNode, DOMNativeVNode, NativeVNode> {
+  (source: VNode, options: CreateRenderContextOptions): NativeVNode;
 }
 
 export type CreateVNodeFnCatch<Fn extends CreateVNodeFn> = Fn;
 
 export interface RenderVNode extends VNode {
-  children: AsyncIterable<ElementDOMNativeVNode[]>;
+  children: AsyncIterable<DOMNativeVNode[]>;
 }
 
 export class RenderContext<P = unknown> extends DOMVContext implements RenderContext<P>, RenderVNode {
@@ -56,9 +56,9 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
   readonly #signal = new SimpleSignal();
   readonly #promise;
 
-  readonly #nodes = new Set<DOMNativeVNode>();
+  readonly #nodes = new Set<NativeVNode>();
 
-  #snapshot: ElementDOMNativeVNode[] | undefined;
+  #snapshot: DOMNativeVNode[] | undefined;
 
   get snapshot() {
     return this.#snapshot;
@@ -119,7 +119,7 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
     return this.#signal.aborted;
   }
 
-  hello?(renderContext: RenderContext, node: DOMNativeVNode) {
+  hello?(renderContext: RenderContext, node: NativeVNode) {
     this.#nodes.add(node);
   }
 
@@ -129,7 +129,14 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
   }
 
   beforeRender?(renderContext: RenderContext, meta: RenderMeta): boolean | Promise<boolean>;
+
   afterRender?(renderContext: RenderContext, meta: RenderMeta, willContinue: boolean): boolean | Promise<boolean>;
+  async afterRender?() {
+
+    return true;
+  }
+
+
   beforeDestroyed?(renderContext: RenderContext): void | Promise<void>;
   afterDestroyed?(renderContext: RenderContext): void | Promise<void>;
 
@@ -218,7 +225,7 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
     return super.close();
   }
 
-  getInstance(source: Function, create: () => DOMNativeVNode): DOMNativeVNode {
+  getInstance(source: Function, create: () => NativeVNode): NativeVNode {
     const indexCounter = this.functionComponentInstanceIndex.get(source) ?? new Counter();
     this.functionComponentInstanceIndex.set(source, indexCounter);
     indexCounter.next();
@@ -235,7 +242,7 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
 
   get children() {
     const renderContext = this;
-    const setSnapshot = (snapshot: ElementDOMNativeVNode[]) => {
+    const setSnapshot = (snapshot: DOMNativeVNode[]) => {
       this.#snapshot = snapshot;
     };
 
@@ -262,7 +269,7 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
 
 }
 
-type TransformInstanceMap = Map<Function, DOMNativeVNode[]>;
+type TransformInstanceMap = Map<Function, NativeVNode[]>;
 type TransformInstanceMapIndex = Map<Function, Counter>;
 
 class Counter {
