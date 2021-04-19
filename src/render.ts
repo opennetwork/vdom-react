@@ -25,7 +25,6 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
     parent,
     controller,
     close,
-    actionsIterator,
     options
   } = context;
 
@@ -129,8 +128,9 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
     willContinue = (await controller?.afterRender?.(context, renderMeta, willContinue) ?? true) && willContinue;
 
     if (willContinue) {
-      const next = await actionsIterator.next();
+      const next = await context.actionsIterator.next();
       if (next.done) {
+        await context.actionsIterator.return?.();
         context.actionsIterator = undefined;
       } else if (next.value) {
         for (const action of next.value) {
@@ -189,7 +189,8 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
     } else if (await options.errorBoundary(error)) {
       // If the error boundary returned true, the error should be thrown later on
       caughtError = error;
-      await actionsIterator.return?.();
+      await context.actionsIterator.return?.();
+      context.actionsIterator = undefined;
     }
     return true;
   }

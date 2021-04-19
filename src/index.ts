@@ -42,17 +42,8 @@ export async function renderAsync(element: ReactElement, root: Element, options:
   let done = false;
 
   const settle = getSettle();
-  const actions = options.actions ?? new Collector<DeferredAction>({
-    eagerCollection: true
-  });
-  const stateChanges = options.stateChanges ?? new Collector<[RenderContext, State]>({
-    eagerCollection: true
-  });
-  const stateChangeIterator = stateChanges[Symbol.asyncIterator]();
 
   const context = options.context ?? contexts.get(root) ?? new RenderContext({
-    actions,
-    stateChanges,
     contextMap: new Map(),
     errorBoundary: onAnyError,
     promise: knownPromise,
