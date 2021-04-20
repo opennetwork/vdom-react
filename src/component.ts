@@ -8,7 +8,7 @@ export type ComponentInstanceMap<P> = WeakMap<ReactComponentClass<P, unknown>, R
 export async function renderComponent<P>(context: RenderContext<P>, source: ReactComponentClass<P, unknown>, callbacks: LifecycleCallbackFns): Promise<[unknown, RenderContextOptions] | undefined>  {
   const {
     classComponentInstances: instance,
-    currentProps: props,
+    currentProps,
     options,
     dispatcher,
     previousProps

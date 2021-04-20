@@ -46,7 +46,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
 
     thrownPromise = false;
 
-    const renderingProps = context.currentProps ?? renderedProps;
+    const renderingProps = context.currentProps;
     const renderingState: StateContainer = context.currentState.container;
 
     renderMeta = {

@@ -77,7 +77,18 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
   currentState: State;
   previousState?: StateContainer;
   previousProps?: P;
-  currentProps?: P;
+
+  #currentProps?: P;
+
+  get currentProps(): P {
+    return this.#currentProps ?? this.previousProps;
+  }
+
+  set currentProps(value: P) {
+    this.#currentProps = value;
+    this.dispatcher.actions.add(() => this.dispatcher.state.change());
+  }
+
   parent?: RenderContext;
   controller?: Controller;
   rendering?: Promise<void>;
