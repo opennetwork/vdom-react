@@ -122,11 +122,6 @@ async function onBeforeRender(context: NativeElement, node: NativeOptionsVNode, 
       documentNode.innerHTML = props["dangerouslySetInnerHTML"];
     } else if (key === "style") {
       updateStyles(documentNode, value);
-      // TODO
-      // else if (typeof value === "string") {
-      //   assertStyleText(documentNode.style);
-      //   documentNode.style.cssText = value;
-      // }
       continue;
     } else if (key.startsWith("on")) {
       const keyWithoutCapture = key.replace(/Capture$/, "");

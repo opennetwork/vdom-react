@@ -1,7 +1,7 @@
 import type { RenderOptions as DOMRenderOptions } from "@opennetwork/vdom";
 import { NativeVNode, DOMVContext, DOMNativeVNode, Native } from "@opennetwork/vdom";
 import type { Tree, VNode } from "@opennetwork/vnode";
-import { Fragment, hydrateChildren } from "@opennetwork/vnode";
+import { Fragment, hydrateChildren, VContextEventsPair } from "@opennetwork/vnode";
 import { SimpleSignal } from "./cancellable";
 import type { Controller, RenderMeta } from "./controller";
 import { Collector } from "microtask-collector";
@@ -147,8 +147,8 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
   beforeDestroyed?(renderContext: RenderContext): void | Promise<void>;
   afterDestroyed?(renderContext: RenderContext): void | Promise<void>;
 
-  constructor(options: RenderSourceContextOptions<P>) {
-    super(options);
+  constructor(options: RenderSourceContextOptions<P>, weak?: WeakMap<object, unknown>, eventsPair?: VContextEventsPair) {
+    super(options, weak, eventsPair);
 
     this.options = options;
     this.controller = this;
@@ -206,8 +206,31 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
     return context;
   }
 
-  hydrate(node: VNode, tree?: Tree): Promise<void> {
-    return super.hydrate(node, tree);
+  async hydrate(node: VNode, tree?: Tree): Promise<void> {
+    await super.hydrate(node, tree);
+    await this.options.rendered?.();
+  }
+
+  protected childContext(documentNode: Element): RenderContext {
+    const existingChildContext = this.weak.get(documentNode);
+    if (existingChildContext instanceof RenderContext) {
+      return existingChildContext;
+    }
+    const childContext = new RenderContext(
+      {
+        ...this.options,
+        source: undefined,
+        root: documentNode,
+        parent: this
+      },
+      this.weak,
+      {
+        events: this.events,
+        target: this.eventsTarget
+      }
+    );
+    this.weak.set(documentNode, childContext);
+    return childContext;
   }
 
   async commitChildren(documentNode: Element, node: VNode, tree?: Tree) {

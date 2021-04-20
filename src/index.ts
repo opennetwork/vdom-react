@@ -20,7 +20,7 @@ interface SettleFn {
 }
 
 interface RenderOptions {
-  rendered?(details: unknown): Promise<void> | void;
+  rendered?(): Promise<void> | void;
   actions?: Collector<DeferredAction>;
   stateChanges?: Collector<[RenderContext, State]>;
   context?: RenderContext;
@@ -39,7 +39,6 @@ export function render(node: ReactElement, root: Element, options: RenderOptions
 
 export async function renderAsync(element: ReactElement, root: Element, options: RenderOptions = {}): Promise<[NativeVNode, RenderContext]> {
   const doneDeferred = deferred();
-  let done = false;
 
   const settle = getSettle();
 
@@ -48,7 +47,8 @@ export async function renderAsync(element: ReactElement, root: Element, options:
     errorBoundary: onAnyError,
     promise: knownPromise,
     createVNode,
-    root
+    root,
+    rendered: options.rendered
   });
   contexts.set(root, context);
   if (options.onContext) {
@@ -62,110 +62,39 @@ export async function renderAsync(element: ReactElement, root: Element, options:
     await hydrate(context, initialNativeNode);
   } catch (error) {
     caughtError = caughtError ?? error;
-    console.log({ caughtError });
   } finally {
-    console.log("finally");
     try {
-      while (promises.size) {
-        console.log("promises");
+      while (promises.size && !caughtError) {
         if (settle) {
           const shouldBreak = await Promise.any([
-            Promise.all(promises).then(() => false),
+            Promise.any(promises).then(() => false),
             runSettle()
           ]);
           if (shouldBreak) {
             break;
           }
         } else {
-          await Promise.all(promises);
+          await Promise.any(promises);
         }
       }
-      console.log("context.close");
       await context.close();
-      done = true;
       doneDeferred.resolve();
-    } catch (e) {
-      console.error(e);
+    } catch (error) {
+      caughtError = caughtError ?? error;
     }
   }
 
-  console.log("finished");
-
   if (caughtError) {
-    console.log({ caughtError });
     throw caughtError;
   }
 
   return [initialNativeNode, context];
-
-  function getNodes(contexts: RenderContext[]) {
-    return contexts.flatMap(
-      (renderContext: RenderContext) =>
-        renderContext.nodes
-          .map((node): [RenderContext, NativeVNode] => [renderContext, node])
-    );
-  }
 
   function createVNodeFromElement(element: ReactElement) {
     return createVNode(
       { reference: Fragment, source: element, options: {} },
       context.createChildRenderContextOptions({})
     );
-  }
-
-  function hasChanged(context: RenderContext): boolean {
-    if (context.source && context.previousState.symbol !== context.currentState.symbol) {
-      return true;
-    }
-    return [...context.contexts].some(hasChanged);
-  }
-
-  // function getChanged(context: RenderContext): RenderContext[] {
-  //   if (context.source && context.previousState.symbol !== context.currentState.symbol) {
-  //     return [context];
-  //   }
-  //   return [...context.contexts].flatMap(getChanged);
-  // }
-
-  async function wait(queue: DeferredActionCollector, iterator = queue[Symbol.asyncIterator]()) {
-    // let result: DeferredActionIteratorResult;
-    // try {
-    //   do {
-    //     result = await Promise.any<DeferredActionIteratorResult>([
-    //       iterator.next(),
-    //       doneDeferred.promise.then((): DeferredActionIteratorResult => ({ done: true, value: undefined }))
-    //     ]);
-    //     if (!result.done && Array.isArray(result.value)) {
-    //       result.value.forEach(onDeferredAction);
-    //     }
-    //   } while (!result.done && !caughtError && !done);
-    // } catch (error) {
-    //   caughtError = caughtError ?? error;
-    // } finally {
-    //   accumulativePromise = undefined;
-    // }
-    //
-    // if (result.done && !done) {
-    //   const nextIterator = queue[Symbol.asyncIterator]();
-    //   knownPromise((async () => {
-    //     await new Promise<void>(actions.queueMicrotask);
-    //     await wait(queue, nextIterator);
-    //   })());
-    // }
-  }
-
-  function onDeferredAction(action: DeferredAction) {
-    knownPromise(runDeferredAction());
-
-    async function runDeferredAction() {
-      if (typeof action === "function") {
-        await action();
-      }
-    }
-  }
-
-  function unknownPromise(promise: Promise<unknown>) {
-    promise.catch(onAnyError);
   }
 
   function onAnyError(error: unknown) {

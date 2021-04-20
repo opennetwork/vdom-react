@@ -259,7 +259,6 @@ export function createReactDispatcher(context: DispatcherContext) {
     dispatcher.actions.add(() => {
       const currentState = hook.memoizedState;
       const nextState = hook.queue.lastRenderedReducer(currentState, action);
-      console.log({ currentState, nextState, q: hook.queue.lastRenderedReducer, action, is: Object.is(nextState, currentState) });
       if (Object.is(nextState, currentState)) {
         return;
       }

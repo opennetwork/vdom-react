@@ -3,7 +3,7 @@ import { render } from "../dist/index.js";
 import * as s from 'styled-components';
 import {
   createElement,
-  Fragment
+  Fragment, useEffect, useState
 } from "react";
 
 const { default: styled } = s.default;
@@ -94,6 +94,17 @@ const buttons = [
 try {
   function App() {
 
+    const [state, setState] = useState("0.");
+    console.log({ state });
+
+    useEffect(() => {
+      let v = Math.random();
+      const interval = setInterval(() => {
+        setState(`${v += 1}`);
+      }, 1000);
+      return () => clearInterval(interval);
+    }, [])
+
     function handleButtonClick() {
 
     }
@@ -110,7 +121,7 @@ try {
       createElement("div", {},
         createElement(Input, {
           type: "text",
-          value: "",
+          value: state,
           disabled: true,
           style: {
             width: '100%',
@@ -135,7 +146,11 @@ try {
         )))
     )
   }
-  await render(App, dom.window.document.body);
+  await render(App, dom.window.document.body, {
+    rendered() {
+      console.log(window.document.body.outerHTML);
+    }
+  });
   console.log(window.document.head.outerHTML);
   console.log(window.document.body.outerHTML);
   console.log("Finished rendering");
