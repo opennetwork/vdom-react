@@ -13,13 +13,9 @@ import { ComponentInstanceMap } from "./component";
 import { CreateVNodeFn as CreateVNodeFnPrototype } from "@opennetwork/vnode/dist/create-node";
 import { renderGenerator } from "./render";
 
-interface RenderDetails {
-  remainingRootsToFlush?: number;
-}
-
 export interface RenderContextOptions extends DOMRenderOptions {
   promise(promise: Promise<unknown>, node: VNode, tree?: Tree): void;
-  rendered?(details: RenderDetails): Promise<void> | void;
+  rendered?(): Promise<void> | void;
   actions?: Collector<DeferredAction>;
   parent?: RenderContext;
   stateChanges?: Collector<[RenderContext, State]>;

@@ -6,6 +6,7 @@ import type {
   Dispatch
 } from "react";
 import type { ReactDispatcher } from "react-reconciler";
+import { RenderContextOptions } from "./context";
 
 export type State = Record<string, unknown>;
 
@@ -20,13 +21,18 @@ export interface RenderFn<S extends State = State, P = unknown, O = unknown> {
 }
 
 export interface LifecycleContext<P = unknown, S extends State = State, O = unknown> {
-  dispatcher: ReactDispatcher;
-  staticLifecycle: ReactStaticLifecycle<P, S>;
-  lifecycle: ReactComponentLifecycle<P, S>;
-  stateContainer: StateContainer<S, P>;
-  previousProps: Readonly<P>;
-  props: Readonly<P>;
-  render: RenderFn<S, P, O>;
+  readonly dispatcher: ReactDispatcher;
+  readonly staticLifecycle: ReactStaticLifecycle<P, S>;
+  readonly lifecycle: ReactComponentLifecycle<P, S>;
+  readonly stateContainer: StateContainer<S, P>;
+  readonly previousProps: Readonly<P>;
+  readonly props: Readonly<P>;
+  readonly render: RenderFn<S, P, O>;
+  callbacks: LifecycleCallbackFns;
+}
+
+export interface LifecycleCallbackFns {
+  onAfterRender?(): void | Promise<void>;
 }
 
 export class AbortLifecycleError {
@@ -63,8 +69,10 @@ export function useReactComponentLifecycleRender<P, S extends State, O = unknown
 }
 
 function componentDidMount<S extends State>(context: LifecycleContext<unknown, S>, previousState: S, snapshot: unknown) {
-  context.lifecycle.componentDidMount?.();
-  context.lifecycle.componentDidUpdate?.(context.previousProps, previousState, snapshot);
+  context.callbacks.onAfterRender = () => {
+    context.lifecycle.componentDidMount?.();
+    context.lifecycle.componentDidUpdate?.(context.previousProps, previousState, snapshot);
+  };
 }
 
 

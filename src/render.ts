@@ -17,14 +17,13 @@ import {
   DOMNativeVNode
 } from "@opennetwork/vdom";
 import { RenderContext, RenderContextOptions } from "./context";
-
+import { LifecycleCallbackFns } from "./lifecycle";
 
 export async function *renderGenerator<P>(context: RenderContext<P>): AsyncIterable<DOMNativeVNode[]> {
   const {
     dispatcher,
     parent,
     controller,
-    close,
     options
   } = context;
 
@@ -41,6 +40,8 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
   let thrownPromise: boolean;
 
   do {
+    let callbacks: LifecycleCallbackFns | undefined = undefined;
+
     dispatcher.beforeRender();
 
     thrownPromise = false;
@@ -64,7 +65,9 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
         renderDeferred = deferred();
         context.rendering = renderDeferred.promise;
         try {
-          renderResult = await render(context);
+          const inProgressCallbacks: LifecycleCallbackFns = {};
+          renderResult = await render(context, inProgressCallbacks);
+          callbacks = inProgressCallbacks;
         } catch (error) {
           // console.log({ theErrorHere: error, source: context.source.name });
           if (await onError(error)) {
@@ -123,7 +126,9 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
         }
       }
       await dispatcher.commitHookEffectList(0);
+      await callbacks?.onAfterRender?.();
     }
+
     willContinue = (await controller?.willContinue?.(context, renderMeta) ?? false) && willContinueScope();
     willContinue = (await controller?.afterRender?.(context, renderMeta, willContinue) ?? true) && willContinue;
 
@@ -150,7 +155,7 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
 
 
   if (caughtError) {
-    await close();
+    await context.close();
     await Promise.reject(caughtError);
   }
 
@@ -196,10 +201,10 @@ export async function *renderGenerator<P>(context: RenderContext<P>): AsyncItera
   }
 }
 
-export async function render<P>(context: RenderContext<P>): Promise<[unknown, RenderContextOptions]>  {
+export async function render<P>(context: RenderContext<P>, callbacks: LifecycleCallbackFns): Promise<[unknown, RenderContextOptions]>  {
   const { source, currentProps: props } = context;
   if (isReactComponentClass<P, Record<string, unknown>>(source)) {
-    return renderComponent(context, source);
+    return renderComponent(context, source, callbacks);
   } else {
     const renderResult = await renderFunction(source, context.dispatcher, props);
     return [renderResult, context.options];

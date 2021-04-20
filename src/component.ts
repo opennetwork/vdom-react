@@ -1,11 +1,11 @@
 import type { Component as ReactComponent, ComponentClass as ReactComponentClass } from "react";
-import { useReactComponentLifecycleRender } from "./lifecycle";
+import { LifecycleCallbackFns, useReactComponentLifecycleRender } from "./lifecycle";
 import { isReactErrorBoundaryInstance } from "./type-guards";
 import type { RenderContext, RenderContextOptions } from "./context";
 
 export type ComponentInstanceMap<P> = WeakMap<ReactComponentClass<P, unknown>, ReactComponent<P, unknown>>;
 
-export async function renderComponent<P>(context: RenderContext<P>, source: ReactComponentClass<P, unknown>): Promise<[unknown, RenderContextOptions] | undefined>  {
+export async function renderComponent<P>(context: RenderContext<P>, source: ReactComponentClass<P, unknown>, callbacks: LifecycleCallbackFns): Promise<[unknown, RenderContextOptions] | undefined>  {
   const {
     classComponentInstances: instance,
     currentProps: props,
@@ -17,7 +17,7 @@ export async function renderComponent<P>(context: RenderContext<P>, source: Reac
   if (!currentInstance) {
     const newInstance = new source(props);
     instance.set(source, newInstance);
-    return renderComponent(context, source);
+    return renderComponent(context, source, callbacks);
   }
 
   const renderResult = useReactComponentLifecycleRender({
@@ -28,6 +28,7 @@ export async function renderComponent<P>(context: RenderContext<P>, source: Reac
     props,
     lifecycle: currentInstance,
     render: currentInstance.render,
+    callbacks
   });
 
   const childrenOptions: RenderContextOptions = {
