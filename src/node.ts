@@ -2,7 +2,6 @@ import { Fragment, VNode } from "@opennetwork/vnode";
 import { NativeVNode, Native } from "@opennetwork/vdom";
 import type { Context as ReactContext, } from "react";
 import { assertFragment, assertFunction, assertProps, isReactElement } from "./type-guards";
-import { renderGenerator } from "./render";
 import type { CreateVNodeFnCatch, CreateRenderContextOptions } from "./context";
 
 export interface ReactContextDescriptor<T = unknown> {

@@ -26,9 +26,9 @@ export interface RenderContextOptions extends DOMRenderOptions {
   createVNode: CreateVNodeFn;
 }
 
-export interface RenderSourceContextOptions extends RenderContextOptions {
+export interface RenderSourceContextOptions<P = unknown> extends RenderContextOptions {
   source?: () => void;
-  initialProps?: unknown;
+  initialProps?: P;
 }
 
 export interface CreateRenderContextOptions extends RenderContextOptions {
@@ -73,7 +73,7 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
 
   actions;
 
-  options: RenderSourceContextOptions;
+  options: RenderSourceContextOptions<P>;
   currentState: State;
   previousState?: StateContainer;
   previousProps?: P;
@@ -136,7 +136,7 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
   beforeDestroyed?(renderContext: RenderContext): void | Promise<void>;
   afterDestroyed?(renderContext: RenderContext): void | Promise<void>;
 
-  constructor(options: RenderSourceContextOptions) {
+  constructor(options: RenderSourceContextOptions<P>) {
     super(options);
 
     this.options = options;
@@ -160,6 +160,7 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
       ...this.dispatcher.state.container,
       symbol: Symbol("Initial")
     };
+    this.previousProps = options.initialProps;
     this.source = options.source;
 
     if (this.source) {
