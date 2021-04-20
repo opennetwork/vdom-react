@@ -7,7 +7,13 @@ import {
   setAttributes
 } from "@opennetwork/vdom";
 import { DeferredActionCollector } from "./queue";
-import { eventProxy, eventProxyCapture, ProxiedListeners } from "./scoped-events";
+import {
+  eventProxy,
+  eventProxyCapture,
+  initEventProxy,
+  initEventProxyActions,
+  ProxiedListeners
+} from "./scoped-events";
 import { VNode } from "@opennetwork/vnode";
 import { Native as DOMNative } from "@opennetwork/vdom";
 
@@ -32,11 +38,65 @@ export function Native(element: NativeElement): NativeVNode {
   return DOMNative(node.options, node);
 }
 
-async function onBeforeRender(context: NativeElement, node: NativeOptionsVNode, documentNode: Element & ProxiedListeners | Text) {
+const KNOWN_STYLES = Symbol("Known Styles");
+
+export interface PreviousStyles {
+  [KNOWN_STYLES]?: unknown;
+}
+
+function updateStyles(documentNode: Element & PreviousStyles, nextStyles: unknown) {
+
+  const previousStyles = documentNode[KNOWN_STYLES];
+
+  if (!isElementStyleable(documentNode)) {
+    return;
+  }
+
+  const nextStylesRecord = isStylesRecord(nextStyles) ? nextStyles : undefined;
+  const nextStylesString = typeof nextStyles === "string" ? nextStyles : undefined;
+  const previousStylesRecord = isStylesRecord(previousStyles) ? previousStyles : undefined;
+  const previousStylesString = typeof previousStyles === "string" ? previousStyles : undefined;
+
+  if (nextStylesRecord) {
+    if (previousStylesString) {
+      documentNode.style.cssText = "";
+      documentNode[KNOWN_STYLES] = undefined;
+    } else if (previousStylesRecord && nextStylesRecord) {
+      for (const key in previousStylesRecord) {
+        if (previousStylesRecord.hasOwnProperty(key) && key in nextStylesRecord) {
+          documentNode.style[key] = "";
+        }
+      }
+      documentNode[KNOWN_STYLES] = undefined;
+    }
+    for (const key in nextStylesRecord) {
+      if (nextStylesRecord.hasOwnProperty(key)) {
+        documentNode.style[key] = nextStylesRecord[key];
+      }
+    }
+  } else {
+    documentNode.style.cssText = nextStylesString ?? "";
+  }
+  documentNode[KNOWN_STYLES] = nextStyles;
+
+  function isStylesRecord(styles: unknown): styles is object & Record<string, unknown> {
+    return typeof styles === "object";
+  }
+
+}
+
+function isElementStyleable<T extends Element>(element: T): element is T & (HTMLElement | SVGElement) {
+  function isElementCSSInlineStyleLike(element: unknown): element is { style: unknown } {
+    return !!element;
+  }
+  return isElementCSSInlineStyleLike(element) && !!element.style;
+}
+
+async function onBeforeRender(context: NativeElement, node: NativeOptionsVNode, documentNode: Element & ProxiedListeners & PreviousStyles | Text) {
   const { actions, props, ref } = context;
 
   if (!isElement(documentNode)) return;
-  documentNode._actions = documentNode._actions ?? actions;
+  initEventProxyActions(documentNode, actions);
 
   const attributes: NativeAttributes = {};
   let hasAttribute = false;
@@ -61,12 +121,11 @@ async function onBeforeRender(context: NativeElement, node: NativeOptionsVNode, 
     } else if (key === "dangerouslySetInnerHTML") {
       documentNode.innerHTML = props["dangerouslySetInnerHTML"];
     } else if (key === "style") {
+      updateStyles(documentNode, value);
       // TODO
-      // if (typeof value === "string") {
+      // else if (typeof value === "string") {
       //   assertStyleText(documentNode.style);
       //   documentNode.style.cssText = value;
-      // } else {
-      //   // TODO
       // }
       continue;
     } else if (key.startsWith("on")) {
@@ -77,14 +136,7 @@ async function onBeforeRender(context: NativeElement, node: NativeOptionsVNode, 
         name = name.toLowerCase();
       }
       name = name.slice(2);
-      const handler = useCapture ? eventProxyCapture : eventProxy;
-      if (typeof value === "function") {
-        documentNode._listeners = documentNode._listeners ?? {};
-        documentNode._listeners[name + useCapture] = value;
-        documentNode.addEventListener(name, handler, useCapture);
-      } else {
-        documentNode.removeEventListener(name, handler, useCapture);
-      }
+      initEventProxy(documentNode, name, value, useCapture);
       continue;
     } else if (
       isDocumentNodeKey(key) &&
