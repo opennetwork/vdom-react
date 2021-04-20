@@ -256,17 +256,19 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
     return super.close();
   }
 
-  getInstance(source: Function, create: () => NativeVNode): NativeVNode {
+  getInstance(source: unknown, create: () => NativeVNode, reference?: unknown): NativeVNode {
     const indexCounter = this.functionComponentInstanceIndex.get(source) ?? new Counter();
     this.functionComponentInstanceIndex.set(source, indexCounter);
     indexCounter.next();
     const { index } = indexCounter;
-    const currentInstances = this.functionComponentInstances.get(source) ?? [];
-    if (currentInstances[index]) {
-      return currentInstances[index];
+    const currentInstances = this.functionComponentInstances.get(source) ?? new Map();
+    const key = reference ? `reference::${reference}` : `counter::${index}`;
+    const currentInstance = currentInstances.get(key);
+    if (currentInstance) {
+      return currentInstance;
     }
     const nextInstance = create();
-    currentInstances[index] = nextInstance;
+    currentInstances.set(key, nextInstance);
     this.functionComponentInstances.set(source, currentInstances);
     return nextInstance;
   }
@@ -300,8 +302,8 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
 
 }
 
-type TransformInstanceMap = Map<Function, NativeVNode[]>;
-type TransformInstanceMapIndex = Map<Function, Counter>;
+type TransformInstanceMap = Map<unknown, Map<unknown, NativeVNode>>;
+type TransformInstanceMapIndex = Map<unknown, Counter>;
 
 class Counter {
   #index = -1;

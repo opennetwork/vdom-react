@@ -4,7 +4,7 @@ import {
   isReactContextProviderElement, isReactElement, isReactForwardRefExoticComponent,
   isReactForwardRefExoticElement
 } from "./type-guards";
-import { Fragment, isSourceReference, VNode } from "@opennetwork/vnode";
+import { Fragment, isSourceReference, SourceReference, VNode } from "@opennetwork/vnode";
 import { Fragment as ReactFragment, ReactElement } from "react";
 import type { NativeVNode, NativeOptionsVNode } from "@opennetwork/vdom";
 import type { createVNode } from "./node";
@@ -17,7 +17,7 @@ export interface TransformContext {
   actions: DeferredActionCollector;
   element: unknown;
   createVNode: typeof createVNode;
-  getInstance(source: Function, create: () => NativeVNode): NativeVNode;
+  getInstance(source: unknown, create: () => NativeVNode, reference?: unknown): NativeVNode;
 }
 
 export function transform(context: TransformContext): NativeVNode {
@@ -65,7 +65,7 @@ export function initialTransform(context: TransformContext): VNode {
       })
     };
   } else if (isReactForwardRefExoticElement(element)) {
-    const { type, props, ref } = element;
+    const { type, props, ref, key } = element;
     if (!isReactForwardRefExoticComponent(type)) {
       throw new Error("Expected ref element");
     }
@@ -73,7 +73,8 @@ export function initialTransform(context: TransformContext): VNode {
     const render = (props: unknown) => source(props, ref);
     return getInstance(
       source,
-      () => createVNode({ reference: Fragment, source: render, options: props || {} }, context.options)
+      () => createVNode({ reference: Fragment, source: render, options: props || {} }, context.options),
+      key
     );
   } else if (isReactElement(element)) {
     const { type, props, ref, key }: ReactElement & { ref?: unknown } = element;
@@ -87,17 +88,22 @@ export function initialTransform(context: TransformContext): VNode {
     } else if (typeof type === "function") {
       return getInstance(
         type,
-        () => createVNode({ reference: Fragment, source: type, options: props || {} }, context.options)
+        () => createVNode({ reference: Fragment, source: type, options: props || {} }, context.options),
+        key
       );
     } else {
-      return Native({
+      return getInstance(
         type,
-        props,
-        ref: ref,
-        children: flattenChildren(props.children, context),
-        actions: actions,
-        key: key
-      });
+        () => Native({
+          type,
+          props,
+          ref: ref,
+          children: flattenChildren(props.children, context),
+          actions: actions,
+          key: key
+        }),
+        key
+      );
     }
   }
   return { reference: Fragment, source: element };
