@@ -17,7 +17,7 @@ export interface TransformContext {
   actions: DeferredActionCollector;
   element: unknown;
   createVNode: typeof createVNode;
-  getInstance(source: unknown, create: () => NativeVNode, reference?: unknown): NativeVNode;
+  getInstance(source: unknown, create: () => NativeVNode, reference?: unknown, referenceRequired?: boolean): NativeVNode;
 }
 
 export function transform(context: TransformContext): NativeVNode {
@@ -102,7 +102,8 @@ export function initialTransform(context: TransformContext): VNode {
           actions: actions,
           key: key
         }),
-        key
+        key,
+        true
       );
     }
   }

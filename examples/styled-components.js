@@ -110,6 +110,7 @@ try {
     }
 
     return createElement("div", {
+      key: "root",
       style: {
         width: 300,
         height: 'auto',

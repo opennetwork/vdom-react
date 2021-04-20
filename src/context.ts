@@ -256,7 +256,13 @@ export class RenderContext<P = unknown> extends DOMVContext implements RenderCon
     return super.close();
   }
 
-  getInstance(source: unknown, create: () => NativeVNode, reference?: unknown): NativeVNode {
+  getInstance(source: unknown, create: () => NativeVNode, reference?: unknown, referenceRequired?: boolean): NativeVNode {
+    if ((typeof reference === "undefined" || reference === null) && referenceRequired) {
+      return create();
+    }
+    if (referenceRequired) {
+      console.log({ source, create, reference });
+    }
     const indexCounter = this.functionComponentInstanceIndex.get(source) ?? new Counter();
     this.functionComponentInstanceIndex.set(source, indexCounter);
     indexCounter.next();
