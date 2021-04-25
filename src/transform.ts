@@ -4,7 +4,7 @@ import {
   isReactContextProviderElement, isReactElement, isReactForwardRefExoticComponent,
   isReactForwardRefExoticElement
 } from "./type-guards";
-import { Fragment, isSourceReference, SourceReference, VNode } from "@opennetwork/vnode";
+import { Fragment, isSourceReference, VNode } from "@opennetwork/vnode";
 import { Fragment as ReactFragment, ReactElement } from "react";
 import type { NativeVNode, NativeOptionsVNode } from "@opennetwork/vdom";
 import type { createVNode } from "./node";
@@ -92,19 +92,14 @@ export function initialTransform(context: TransformContext): VNode {
         key
       );
     } else {
-      return getInstance(
+      return Native({
         type,
-        () => Native({
-          type,
-          props,
-          ref: ref,
-          children: flattenChildren(props.children, context),
-          actions: actions,
-          key: key
-        }),
-        key,
-        true
-      );
+        props,
+        ref: ref,
+        children: flattenChildren(props.children, context),
+        actions: actions,
+        key: key
+      });
     }
   }
   return { reference: Fragment, source: element };
@@ -144,4 +139,5 @@ export function initialTransform(context: TransformContext): VNode {
   }
 
 }
+
 
